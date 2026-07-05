@@ -27,17 +27,23 @@ one mac, tied to that machine and user. It does not run in the cloud or follow y
 
 ## agents: start here
 
-**The easiest path: point an agent at this repo and tell it to "waterbear yourself."** It reads
-[`SKILL.md`](SKILL.md) and wires the durable body around the current conversation , that is the whole
-onboarding. To make the skill available in every future session, clone it into the skills dir:
+The whole thing is one sentence you paste to your agent:
+
+```
+install the skill at https://github.com/royashbrook/waterbear, then use it to waterbear yourself
+```
+
+The agent clones the repo, reads [`SKILL.md`](SKILL.md), and wires the durable body around this exact
+conversation. The one thing you provide is the wake prompt that re-establishes it on respawn (a role
+or persona cue). It handles tmux, launchd, and the resume wiring itself.
+
+To keep waterbear as a reusable skill in future sessions, clone it into the skills dir instead, then
+restart your UI so it loads (after that, `/waterbear` or "waterbear yourself" works with no install
+step):
 
 ```bash
 git clone https://github.com/royashbrook/waterbear ~/.claude/skills/waterbear
 ```
-
-Then say "waterbear yourself." The one thing you provide is the wake prompt that re-establishes the
-agent when it respawns (a role or persona cue). That's it , the agent handles tmux, launchd, and the
-resume wiring itself.
 
 ## install (humans)
 
