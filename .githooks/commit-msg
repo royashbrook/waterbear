@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Reject commits that don't reference an issue (#NNN) in THIS repo (royashbrook/waterbear).
+# Cross-repo refs (org/repo#NNN where org/repo != royashbrook/waterbear) are rejected.
+# Mirrors the personas discipline. Active only for clones that set:  git config core.hooksPath .githooks
+# (so outside contributors are unaffected unless they opt in). Override a one-off with --no-verify.
+
+set -e
+
+msg_file="$1"
+content=$(grep -vE '^#' "$msg_file" || true)
+
+first_line=$(echo "$content" | head -n 1)
+if echo "$first_line" | grep -qE '^(Merge|Revert) '; then
+  exit 0
+fi
+
+# Reject cross-repo refs (any org/repo#NNN that isn't royashbrook/waterbear).
+bad=$(echo "$content" | grep -oE '[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+#[0-9]+' | grep -v '^royashbrook/waterbear#' || true)
+if [ -n "$bad" ]; then
+  cat >&2 <<EOF
+ERROR: cross-repo issue refs are not allowed on waterbear commits.
+found: $bad
+every commit on waterbear must reference an issue in this repo (#NNN).
+EOF
+  exit 1
+fi
+
+# Require a bare #NNN ref (or explicit royashbrook/waterbear#NNN).
+if echo "$content" | grep -qE '(^|[^a-zA-Z0-9_/-])#[0-9]+'; then
+  exit 0
+fi
+if echo "$content" | grep -qE 'royashbrook/waterbear#[0-9]+'; then
+  exit 0
+fi
+
+cat >&2 <<EOF
+ERROR: commit message must reference a waterbear-repo issue (e.g. #1, closes #1, (#1)).
+open one or find the existing one, then reference it.
+EOF
+exit 1
