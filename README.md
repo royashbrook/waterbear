@@ -1,10 +1,24 @@
-# waterbear
+<div align="center">
 
-Keep a `claude --remote-control` session alive indefinitely , through crashes, patches, quits,
-and reboots , and (optionally) have it resume the exact same conversation when it comes back.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.png">
+  <img alt="waterbear" src="assets/logo.png" width="340">
+</picture>
 
-Named for the [tardigrade](https://en.wikipedia.org/wiki/Tardigrade): the animal that suspends its
-life under stress and revives when conditions return. Same trick, for a Claude Code session.
+### the session that refuses to die
+
+keep a `claude --remote-control` session alive through crashes, patches, quits, and reboots - and (optionally) have it resume the exact same conversation when it comes back.
+
+[![license](https://img.shields.io/badge/license-MIT-057b8d)](LICENSE)
+[![platform](https://img.shields.io/badge/platform-macOS%20(launchd)-057b8d)](#other-operating-systems)
+[![claude code](https://img.shields.io/badge/claude%20code-skill-057b8d)](SKILL.md)
+
+</div>
+
+Named for the [tardigrade](https://en.wikipedia.org/wiki/Tardigrade) (the "water bear"): the animal
+that suspends its life under stress and revives when conditions return. Same trick, for a Claude Code
+session - a crash, a patch, a quit, or a reboot kills the process; waterbear brings it back on its
+own, mid-thought.
 
 ## Quickstart (macOS)
 
@@ -21,7 +35,7 @@ CLAUDE_RC_NAME=myagent CLAUDE_RC_DIR=~/proj \
 ```
 
 Resume-mode also needs a one-time SessionStart hook so the live session id is recorded for the guard
-to resume , see [`SKILL.md`](SKILL.md) for the exact `settings.json` block.
+to resume - see [`SKILL.md`](SKILL.md) for the exact `settings.json` block.
 
 Or straight from the raw script:
 
@@ -33,12 +47,12 @@ CLAUDE_RC_NAME=myagent curl -fsSL \
 Attach any time with `tmux attach -t myagent` (it also shows on your phone, the desktop app, and
 claude.ai). Stop with `launchctl bootout gui/$(id -u)/com.<user>.claude-rc.myagent`.
 
-**Prereqs:** the `claude` CLI (run `claude` once to log in , waterbear reuses your login, it does
+**Prereqs:** the `claude` CLI (run `claude` once to log in - waterbear reuses your login, it does
 not handle auth) and `tmux` (`brew install tmux`).
 
 **Where it runs:** waterbear is local to one machine (macOS/launchd + tmux + a `claude` CLI
 process), tied to that mac and user. You can invoke it from a Claude Desktop session, but the durable
-body is a CLI process and it will NOT resume that desktop conversation (resume-by-id is CLI-only) ,
+body is a CLI process and it will NOT resume that desktop conversation (resume-by-id is CLI-only) -
 it births a separate CLI body you then drive via remote-control. It does not apply to cloud / Claude
 Code on web (no local machine to keep alive).
 
@@ -54,9 +68,9 @@ Four pieces, each doing one job:
 4. **The wake.** launchd has no keyboard, and a positional prompt does not auto-run in interactive
    mode (under `--remote-control` it is read as a session title), so the guard types the first
    prompt with `tmux send-keys` once the UI has settled. Two modes:
-   - **fresh** , types `CLAUDE_RC_WAKE`, whatever re-establishes your agent (a role/persona
+   - **fresh** - types `CLAUDE_RC_WAKE`, whatever re-establishes your agent (a role/persona
      bootstrap, a project brief). Without it a respawn comes up as a blank assistant.
-   - **resume** (`CLAUDE_RC_RESUME=1`) , relaunches `claude --remote-control <name> --resume <id>`
+   - **resume** (`CLAUDE_RC_RESUME=1`) - relaunches `claude --remote-control <name> --resume <id>`
      from the on-disk transcript (which survives a crash), so it returns as itself with full
      context, then types `CLAUDE_RC_RESUME_WAKE` to re-arm anything session-scoped (a monitor /
      watcher / background task dies with the process; context comes back, rails do not).
@@ -64,13 +78,13 @@ Four pieces, each doing one job:
 Resume-mode records the live session id on every start via a **SessionStart hook**
 (`scripts/rc-session-capture-hook`, gated on `CLAUDE_RC_NAME` so only the waterbear body writes it)
 to `~/.claude/rc-session-<name>`. The guard consumes that file before resuming, so a stale id can't
-crashloop , it falls back to a fresh start on the next respawn.
+crashloop - it falls back to a fresh start on the next respawn.
 
 ## Environment
 
 | env | meaning |
 |---|---|
-| `CLAUDE_RC_NAME` | internal id , tmux name + launchd label + id file (default `claude`; keep short, no spaces) |
+| `CLAUDE_RC_NAME` | internal id - tmux name + launchd label + id file (default `claude`; keep short, no spaces) |
 | `CLAUDE_RC_TITLE` | display title in the session list (default = NAME; may have spaces, e.g. `"Roy - Theaetetus"`) |
 | `CLAUDE_RC_DIR` | working directory (default `$HOME`) |
 | `CLAUDE_RC_WAKE` | prompt typed on a FRESH respawn (identity / bootstrap) |
@@ -87,7 +101,7 @@ is for recovery, not infinite accumulation.
 ## Other operating systems
 
 This is a macOS/launchd reference implementation. The pattern ports directly: swap the LaunchAgent
-for a systemd user service (`Restart=always`) or any process supervisor, and keep the guard logic ,
+for a systemd user service (`Restart=always`) or any process supervisor, and keep the guard logic -
 tmux + `--remote-control` + `send-keys` wake + resume-by-captured-id. Read
 [`scripts/waterbear-install`](scripts/waterbear-install) and adapt.
 
@@ -97,6 +111,13 @@ tmux + `--remote-control` + `send-keys` wake + resume-by-captured-id. Read
 agent at this repo and it can set itself up as always-on. The one thing you provide is the wake
 prompt that re-establishes the agent (e.g. a persona or role cue).
 
+```bash
+git clone https://github.com/royashbrook/waterbear ~/.claude/skills/waterbear
+```
+
+Then tell the agent to "waterbear yourself" - it reads `SKILL.md` and wires the durable body around
+the current conversation.
+
 ## License
 
-MIT , see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE).
