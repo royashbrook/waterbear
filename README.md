@@ -36,6 +36,12 @@ claude.ai). Stop with `launchctl bootout gui/$(id -u)/com.<user>.claude-rc.myage
 **Prereqs:** the `claude` CLI (run `claude` once to log in , waterbear reuses your login, it does
 not handle auth) and `tmux` (`brew install tmux`).
 
+**Where it runs:** waterbear is local to one machine (macOS/launchd + tmux + a `claude` CLI
+process), tied to that mac and user. You can invoke it from a Claude Desktop session, but the durable
+body is a CLI process and it will NOT resume that desktop conversation (resume-by-id is CLI-only) ,
+it births a separate CLI body you then drive via remote-control. It does not apply to cloud / Claude
+Code on web (no local machine to keep alive).
+
 ## How it works
 
 Four pieces, each doing one job:

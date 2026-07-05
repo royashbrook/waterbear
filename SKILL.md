@@ -21,6 +21,24 @@ the exact prior conversation from disk so the agent returns as itself, mid-thoug
 
 Not for: a one-off task, or a session you WANT to end when you close the terminal.
 
+## Where this runs (read first , it's local to one machine)
+
+waterbear wires a launchd LaunchAgent + tmux + a `claude` CLI process on ONE computer. that has
+consequences worth stating up front:
+
+- **macOS only** (launchd). the pattern ports to linux/systemd (see "Other operating systems"), but
+  this installer is mac. it is tied to that machine and user , the LaunchAgent is per-user and
+  durable only while you are logged in, and the body does not follow you to another machine.
+- **Claude Desktop app**: you CAN invoke this from a desktop session, but the durable body is a
+  CLI/tmux process, and it will NOT resume that desktop conversation , resume-by-id is a CLI feature
+  the desktop app does not expose. installing births a SEPARATE CLI body; you then drive it from the
+  desktop / phone / web via remote-control. (identity still survives if your wake prompt
+  reconstitutes the agent from durable state; only the in-flight desktop chat is what you'd lose.)
+- **cloud / Claude Code on web**: not applicable , there is no local machine, launchd, or tmux to
+  keep alive. waterbear is for a session running on your own computer.
+
+If you do not want an always-on process tied to your mac, do not install it.
+
 ## Waterbear yourself (the common case)
 
 Most often an agent runs this ON ITSELF , "waterbear yourself" , to make THIS conversation survive
