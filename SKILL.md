@@ -43,7 +43,17 @@ If you do not want an always-on process tied to your mac, do not install it.
 
 Most often an agent runs this ON ITSELF , "waterbear yourself" , to make THIS conversation survive
 restarts and resume automatically. The defaults do the work: your current directory, your current
-session. Minimal steps:
+session.
+
+The scripts live in `scripts/` next to this file. If you were handed only the repo URL and don't
+have it locally yet, clone it first , and to make the skill reusable in every future session, clone
+it straight into the skills dir:
+
+```bash
+git clone https://github.com/royashbrook/waterbear ~/.claude/skills/waterbear
+```
+
+Then run the installer at `~/.claude/skills/waterbear/scripts/waterbear-install`. Minimal steps:
 
 1. Pick a short internal name (no spaces), usually your own (`kai`, `theo`). Optionally a pretty
    `CLAUDE_RC_TITLE` for the session list.
@@ -56,7 +66,7 @@ session. Minimal steps:
 4. Install the guard in resume-mode, defaulting to where you are:
    ```bash
    CLAUDE_RC_NAME=<name> CLAUDE_RC_DIR="$(pwd)" CLAUDE_RC_RESUME=1 \
-     bash /path/to/waterbear/scripts/waterbear-install
+     bash ~/.claude/skills/waterbear/scripts/waterbear-install
    ```
    Optional: `CLAUDE_RC_RESUME_WAKE="<short re-init cue>"` (typed after each resume, e.g. to re-arm a
    monitor/watcher) and `CLAUDE_RC_WAKE="<identity bootstrap>"` (used only if there is ever no
