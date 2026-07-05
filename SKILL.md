@@ -1,6 +1,6 @@
 ---
 name: waterbear
-description: Use when you want a Claude Code (or terminal AI) session to survive crashes, patches, quits, and reboots and come back on its own , keep an agent always-on / persistent / unkillable / durable, auto-restart a remote-control session, or have a respawn resume the SAME conversation instead of starting blank. macOS/launchd reference implementation, adaptable to other OSes.
+description: Use when you want a Claude Code (or terminal AI) session to survive crashes, patches, quits, and reboots and come back on its own , when an agent is told to "waterbear yourself" / "make yourself always-on / unkillable / permanent", or when you want a respawn to RESUME the same conversation instead of starting blank. Most often an agent runs it on ITSELF to persist the current conversation. macOS/launchd reference implementation, adaptable to other OSes.
 ---
 
 # waterbear
@@ -21,6 +21,36 @@ the exact prior conversation from disk so the agent returns as itself, mid-thoug
 
 Not for: a one-off task, or a session you WANT to end when you close the terminal.
 
+## Waterbear yourself (the common case)
+
+Most often an agent runs this ON ITSELF , "waterbear yourself" , to make THIS conversation survive
+restarts and resume automatically. The defaults do the work: your current directory, your current
+session. Minimal steps:
+
+1. Pick a short internal name (no spaces), usually your own (`kai`, `theo`). Optionally a pretty
+   `CLAUDE_RC_TITLE` for the session list.
+2. Pin THIS conversation as the resume target:
+   ```bash
+   mkdir -p ~/.claude && printf '%s\n' "$CLAUDE_CODE_SESSION_ID" > ~/.claude/rc-session-<name>
+   ```
+3. Make sure the capture hook is wired as a SessionStart hook (see "the capture hook" below) so that
+   id self-heals on every future restart. If your project already wires it, skip this.
+4. Install the guard in resume-mode, defaulting to where you are:
+   ```bash
+   CLAUDE_RC_NAME=<name> CLAUDE_RC_DIR="$(pwd)" CLAUDE_RC_RESUME=1 \
+     bash /path/to/waterbear/scripts/waterbear-install
+   ```
+   Optional: `CLAUDE_RC_RESUME_WAKE="<short re-init cue>"` (typed after each resume, e.g. to re-arm a
+   monitor/watcher) and `CLAUDE_RC_WAKE="<identity bootstrap>"` (used only if there is ever no
+   conversation to resume).
+5. Enter the durable body. It lives in tmux under launchd. **Already inside a tmux session named
+   `<name>`?** you are durable now, nothing else to do. **Not in tmux?** installing starts your
+   durable tmux body , end this session so the two don't run in parallel, and you continue in the
+   tmux body resuming this exact conversation.
+
+Only ask the human if they want to override a default (a different directory, custom wake prompts).
+Otherwise just set yourself up and confirm.
+
 ## How it works (the pattern, 4 pieces)
 
 1. **remote-control** , one session reachable from phone/desktop/web at once. needs a real tty.
@@ -37,7 +67,10 @@ Not for: a one-off task, or a session you WANT to end when you close the termina
      `CLAUDE_RC_RESUME_WAKE` , a short re-arm cue, because resume restores context but not
      session-armed rails (a monitor / watcher / background task dies with the process).
 
-## Install (macOS)
+## Fresh named session (from scratch)
+
+To stand up a brand-NEW named session (not resuming an existing conversation , e.g. birthing a new
+persistent agent):
 
 ```bash
 # floor: respawn + fresh-wake
@@ -51,7 +84,9 @@ CLAUDE_RC_NAME=myagent CLAUDE_RC_DIR=~/proj \
   bash scripts/waterbear-install
 ```
 
-Resume-mode ALSO needs `scripts/rc-session-capture-hook` wired as a **SessionStart hook** so the
+### The capture hook (resume-mode)
+
+Resume-mode needs `scripts/rc-session-capture-hook` wired as a **SessionStart hook** so the
 live session id gets recorded (to `~/.claude/rc-session-<name>`) for the guard to resume. Add it to
 the project's `.claude/settings.json` (in `CLAUDE_RC_DIR`) or global `~/.claude/settings.json`, using
 the **absolute path** to the hook (the hook runs from the agent's cwd, which is not the skill dir):
