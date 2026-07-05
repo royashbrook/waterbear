@@ -64,7 +64,8 @@ crashloop , it falls back to a fresh start on the next respawn.
 
 | env | meaning |
 |---|---|
-| `CLAUDE_RC_NAME` | session / tmux name (default `claude`) |
+| `CLAUDE_RC_NAME` | internal id , tmux name + launchd label + id file (default `claude`; keep short, no spaces) |
+| `CLAUDE_RC_TITLE` | display title in the session list (default = NAME; may have spaces, e.g. `"Roy - Theaetetus"`) |
 | `CLAUDE_RC_DIR` | working directory (default `$HOME`) |
 | `CLAUDE_RC_WAKE` | prompt typed on a FRESH respawn (identity / bootstrap) |
 | `CLAUDE_RC_RESUME` | `1` = resume the prior conversation by id instead of a fresh one |

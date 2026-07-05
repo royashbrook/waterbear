@@ -77,11 +77,27 @@ Every env var is documented in the installer's header.
 
 | env | meaning |
 |---|---|
-| `CLAUDE_RC_NAME` | session / tmux name (default `claude`) |
+| `CLAUDE_RC_NAME` | internal id , tmux name + launchd label + id file (default `claude`; keep short, no spaces) |
+| `CLAUDE_RC_TITLE` | display title in the session list (default = NAME; may have spaces, e.g. `"Roy - Theaetetus"`) |
 | `CLAUDE_RC_DIR` | working dir (default `$HOME`) |
 | `CLAUDE_RC_WAKE` | prompt typed on a FRESH respawn (identity/bootstrap) |
 | `CLAUDE_RC_RESUME` | `1` = resume the prior conversation by id instead of fresh |
 | `CLAUDE_RC_RESUME_WAKE` | prompt typed AFTER a resume (re-arm rails) |
+
+## Renaming
+
+- **Change the display title only** (`CLAUDE_RC_TITLE`): just re-run the installer with the new
+  title. It takes effect on the next respawn (a live session's title is fixed at launch, so kill
+  the session to apply it now , in resume-mode it comes right back with the new title). No orphan,
+  because the internal `CLAUDE_RC_NAME` (and thus the launchd label) is unchanged.
+- **Change the internal `CLAUDE_RC_NAME`**: this changes the launchd label, plist path, tmux name,
+  and id file, so the OLD LaunchAgent is orphaned. Tear it down first, then install fresh:
+  ```bash
+  launchctl bootout gui/$(id -u)/com.<user>.claude-rc.<OLDNAME>   # stop old agent
+  rm -f ~/Library/LaunchAgents/com.<user>.claude-rc.<OLDNAME>.plist
+  mv ~/.claude/rc-session-<OLDNAME> ~/.claude/rc-session-<NEWNAME> 2>/dev/null || true  # keep resume target
+  CLAUDE_RC_NAME=<NEWNAME> ... bash scripts/waterbear-install
+  ```
 
 ## The resume caveat (important)
 
