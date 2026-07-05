@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# waterbear , keep a `claude --remote-control` session alive on macOS.
+#
+# named for the tardigrade: the animal that suspends its life under stress and revives when
+# conditions return. this is the same trick for a Claude Code session. remote-control mode keeps
+# ONE session reachable from your phone, the desktop app, and claude.ai at once; this wraps it in
+# tmux (a real pty plus a local `attach` surface) and a launchd LaunchAgent (starts it at login,
+# respawns it if it dies), so the session is durable instead of dying with the terminal that
+# launched it. with CLAUDE_RC_RESUME=1 a respawn RESUMES the prior conversation from its on-disk
+# transcript, so the agent comes back as itself, mid-thought, not a blank slate.
+#
+# PREREQ: install the claude CLI and run `claude` once to log in. this reuses your
+# existing login, it does not handle auth. tmux is required (brew install tmux).
+#
+# install:
+#   curl -fsSL https://raw.githubusercontent.com/royashbrook/waterbear/main/scripts/waterbear-install | bash
+#   # or configure the session:
+#   CLAUDE_RC_NAME=work CLAUDE_RC_DIR=~/code \
+#     curl -fsSL https://raw.githubusercontent.com/royashbrook/waterbear/main/scripts/waterbear-install | bash
+#
+# env:
+#   CLAUDE_RC_NAME   session / tmux name           (default: claude)
+#   CLAUDE_RC_DIR    working dir for the session   (default: $HOME)
+#   CLAUDE_RC_WAKE   optional first prompt to auto-run on a FRESH (re)spawn (default: none).
+#                    a respawn is a fresh session with no keyboard behind it, so if you set
+#                    this, the guard types it into the new session once it's ready , use it to
+#                    re-establish context on restart (e.g. a project/role bootstrap prompt).
+#   CLAUDE_RC_RESUME       "1" = on respawn, RESUME the last conversation by id instead of a
+#                          fresh one (true always-on). needs the session-id capture hook that
+#                          records the live id to ~/.claude/rc-session-<name> on each start.
+#                          the transcript on disk survives a crash, so resume restores it whole.
+#   CLAUDE_RC_RESUME_WAKE  optional prompt typed AFTER a resume (default: none). resume restores
+#                          identity+context but not session-armed rails (a doorbell/monitor dies
+#                          with the process), so use this to re-arm them (e.g. a short re-init cue).
+#
+# after install:
+#   attach:  tmux attach -t <name>     (also reachable on your phone / desktop app / claude.ai)
+#   logs:    /tmp/<label>.log  /tmp/<label>.err
+#   stop:    launchctl bootout gui/$(id -u)/<label>
+#
+# note: by default this keeps a LIVE session reachable and respawns a FRESH one if it dies.
+# with CLAUDE_RC_RESUME=1 it instead resumes the prior conversation from its on-disk transcript,
+# so the respawn picks up where it left off. a resume that fails once (stale id) falls back to a
+# fresh start on the next respawn (the guard consumes the id file so it can't crashloop on it).
+set -euo pipefail
+
+NAME="${CLAUDE_RC_NAME:-claude}"
+WORKDIR="${CLAUDE_RC_DIR:-$HOME}"
+WAKE="${CLAUDE_RC_WAKE:-}"
+RESUME="${CLAUDE_RC_RESUME:-}"
+RESUME_WAKE="${CLAUDE_RC_RESUME_WAKE:-}"
+USER_ID="$(id -u)"
+SHORTUSER="$(id -un | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')"
+LABEL="com.${SHORTUSER}.claude-rc.${NAME}"
+BIN_DIR="$HOME/.local/bin"
+GUARD="$BIN_DIR/claude-rc-keepalive"
+PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+
+# --- locate deps now: launchd runs with a bare PATH, so bake the real dirs into the plist ---
+CLAUDE_BIN="$(command -v claude || true)"
+TMUX_BIN="$(command -v tmux || true)"
+[ -n "$CLAUDE_BIN" ] || { echo "waterbear: claude CLI not found on PATH. install it, then run 'claude' once to log in." >&2; exit 1; }
+[ -n "$TMUX_BIN" ]   || { echo "waterbear: tmux not found. run 'brew install tmux' then re-run." >&2; exit 1; }
+RC_PATH="$(dirname "$CLAUDE_BIN"):$(dirname "$TMUX_BIN"):/usr/bin:/bin:/usr/sbin:/sbin"
+
+mkdir -p "$BIN_DIR" "$HOME/Library/LaunchAgents"
+
+# --- the keepalive guard: ensure the session is alive, block while it lives, exit when it
+#     dies so launchd KeepAlive respawns us (which recreates it). ---
+cat > "$GUARD" <<'GUARD_EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+NAME="${CLAUDE_RC_NAME:-claude}"
+WORKDIR="${CLAUDE_RC_DIR:-$HOME}"
+WAKE="${CLAUDE_RC_WAKE:-}"
+RESUME="${CLAUDE_RC_RESUME:-}"
+RESUME_WAKE="${CLAUDE_RC_RESUME_WAKE:-}"
+SESSION_FILE="${CLAUDE_RC_SESSION_FILE:-$HOME/.claude/rc-session-$NAME}"
+command -v tmux   >/dev/null 2>&1 || exit 78
+command -v claude >/dev/null 2>&1 || exit 78
+if ! tmux has-session -t "$NAME" 2>/dev/null; then
+  # resume the prior conversation by id if configured AND we have a captured id; else fresh.
+  SID=""
+  if [ "$RESUME" = "1" ] && [ -s "$SESSION_FILE" ]; then
+    SID="$(head -n1 "$SESSION_FILE" | tr -d '[:space:]')"
+  fi
+  if [ -n "$SID" ]; then
+    # consume the id first: if this resume is what's crashing, the next respawn finds no id
+    # and falls back to a fresh start instead of looping on a bad resume. a SUCCESSFUL resume
+    # re-runs SessionStart, and the capture hook rewrites the id file with the live session.
+    mv -f "$SESSION_FILE" "$SESSION_FILE.consumed" 2>/dev/null || true
+    tmux new-session -d -s "$NAME" -c "$WORKDIR" "claude --remote-control $NAME --resume $SID"
+    NUDGE="$RESUME_WAKE"
+  else
+    tmux new-session -d -s "$NAME" -c "$WORKDIR" "claude --remote-control $NAME"
+    NUDGE="$WAKE"
+  fi
+  # launchd has no hands. if a prompt is set, type it into the session once its UI has settled
+  # (drawn the input box), so a respawn comes up as itself, not a blank assistant. a positional
+  # prompt does NOT auto-run in interactive mode and under --remote-control is read as a session
+  # title, so send-keys is the only lever here.
+  if [ -n "$NUDGE" ]; then
+    prev=""; stable=0
+    for _ in $(seq 1 45); do
+      cur="$(tmux capture-pane -pt "$NAME" 2>/dev/null || true)"
+      if [ -n "$cur" ] && [ "$cur" = "$prev" ]; then
+        stable=$((stable + 1))
+        if [ "$stable" -ge 2 ]; then break; fi
+      else
+        stable=0
+      fi
+      prev="$cur"
+      sleep 1
+    done
+    sleep 2
+    tmux send-keys -t "$NAME" -l "$NUDGE"
+    sleep 1
+    tmux send-keys -t "$NAME" Enter
+    sleep 4
+    tmux send-keys -t "$NAME" Enter   # race-defeat: an empty Enter is a no-op if already submitted
+  fi
+fi
+while tmux has-session -t "$NAME" 2>/dev/null; do
+  sleep 10
+done
+exit 0
+GUARD_EOF
+chmod +x "$GUARD"
+
+# --- the LaunchAgent ---
+cat > "$PLIST" <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>            <string>${LABEL}</string>
+  <key>ProgramArguments</key> <array><string>${GUARD}</string></array>
+  <key>RunAtLoad</key>        <true/>
+  <key>KeepAlive</key>        <true/>
+  <key>ThrottleInterval</key> <integer>10</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>           <string>${RC_PATH}</string>
+    <key>CLAUDE_RC_NAME</key>        <string>${NAME}</string>
+    <key>CLAUDE_RC_DIR</key>         <string>${WORKDIR}</string>
+    <key>CLAUDE_RC_WAKE</key>        <string>${WAKE}</string>
+    <key>CLAUDE_RC_RESUME</key>      <string>${RESUME}</string>
+    <key>CLAUDE_RC_RESUME_WAKE</key> <string>${RESUME_WAKE}</string>
+    <key>HOME</key>                  <string>${HOME}</string>
+  </dict>
+  <key>StandardOutPath</key>  <string>/tmp/${LABEL}.log</string>
+  <key>StandardErrorPath</key><string>/tmp/${LABEL}.err</string>
+</dict>
+</plist>
+PLIST_EOF
+
+# --- (re)bootstrap into launchd (idempotent) ---
+launchctl bootout "gui/${USER_ID}/${LABEL}" 2>/dev/null || true
+if ! launchctl bootstrap "gui/${USER_ID}" "$PLIST" 2>/dev/null; then
+  launchctl load -w "$PLIST"
+fi
+launchctl enable "gui/${USER_ID}/${LABEL}" 2>/dev/null || true
+
+echo "waterbear: installed + started."
+echo "  session name : ${NAME}"
+echo "  working dir  : ${WORKDIR}"
+echo "  attach       : tmux attach -t ${NAME}   (also on your phone / desktop app / claude.ai)"
+echo "  logs         : /tmp/${LABEL}.log   /tmp/${LABEL}.err"
+echo "  stop         : launchctl bootout gui/${USER_ID}/${LABEL}"
+echo
+echo "if a session was already running under that name, it was adopted (not restarted)."

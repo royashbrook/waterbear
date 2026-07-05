@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# rc-session-capture-hook , SessionStart hook.
+#
+# records THIS session's id so the persistent remote-control keepalive guard
+# (roy/scripts/persistent-claude-install) can RESUME this exact conversation on the next
+# (re)spawn instead of starting fresh , the on-disk transcript survives a crash, so resume
+# restores it whole. writes ~/.claude/rc-session-<name>, which the guard reads when
+# CLAUDE_RC_RESUME=1.
+#
+# GATED: only the persistent RC body writes it. that body carries CLAUDE_RC_NAME (set by its
+# launchd plist); a normal session at this repo has no CLAUDE_RC_NAME and exits untouched, so a
+# sibling opening a window here never clobbers theo's resume target. runs on resume too (hooks
+# re-run on resume), so the file self-heals to the live id every start.
+set -euo pipefail
+
+name="${CLAUDE_RC_NAME:-}"
+[ -n "$name" ] || exit 0   # not the persistent RC body , do nothing
+
+sid="${CLAUDE_CODE_SESSION_ID:-}"
+if [ -z "$sid" ]; then
+  # fallback: pull session_id from the hook's stdin JSON payload
+  payload="$(cat 2>/dev/null || true)"
+  sid="$(printf '%s' "$payload" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1)"
+fi
+[ -n "$sid" ] || exit 0
+
+mkdir -p "$HOME/.claude"
+printf '%s\n' "$sid" > "$HOME/.claude/rc-session-${name}"
+rm -f "$HOME/.claude/rc-session-${name}.consumed" 2>/dev/null || true
+exit 0
