@@ -14,9 +14,14 @@ CLAUDE_RC_NAME=myagent CLAUDE_RC_DIR=~/proj CLAUDE_RC_WAKE="you are my X agent, 
   bash scripts/waterbear-install
 
 # always-on: session respawns AND resumes the same conversation from disk
-CLAUDE_RC_NAME=myagent CLAUDE_RC_DIR=~/proj CLAUDE_RC_RESUME=1 CLAUDE_RC_RESUME_WAKE="re-init" \
+# (CLAUDE_RC_WAKE is the fallback used only when there's no conversation to resume, e.g. first run)
+CLAUDE_RC_NAME=myagent CLAUDE_RC_DIR=~/proj \
+  CLAUDE_RC_RESUME=1 CLAUDE_RC_RESUME_WAKE="re-init" CLAUDE_RC_WAKE="you are my X agent" \
   bash scripts/waterbear-install
 ```
+
+Resume-mode also needs a one-time SessionStart hook so the live session id is recorded for the guard
+to resume , see [`SKILL.md`](SKILL.md) for the exact `settings.json` block.
 
 Or straight from the raw script:
 

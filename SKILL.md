@@ -45,18 +45,33 @@ CLAUDE_RC_NAME=myagent CLAUDE_RC_DIR=~/proj CLAUDE_RC_WAKE="you are my X agent, 
   bash scripts/waterbear-install
 
 # always-on: respawn + RESUME the same conversation
-CLAUDE_RC_NAME=myagent CLAUDE_RC_DIR=~/proj CLAUDE_RC_RESUME=1 CLAUDE_RC_RESUME_WAKE="re-init" \
+# (CLAUDE_RC_WAKE is the fallback typed when there's NO conversation to resume , e.g. first launch)
+CLAUDE_RC_NAME=myagent CLAUDE_RC_DIR=~/proj \
+  CLAUDE_RC_RESUME=1 CLAUDE_RC_RESUME_WAKE="re-init" CLAUDE_RC_WAKE="you are my X agent" \
   bash scripts/waterbear-install
 ```
 
-Resume-mode also needs `scripts/rc-session-capture-hook` wired as a **SessionStart hook** (in the
-project's `.claude/settings.json` or global `~/.claude/settings.json`). It records the live session
-id to `~/.claude/rc-session-<name>` every start so the guard knows which conversation to resume. It
-is gated on `CLAUDE_RC_NAME`, so only the waterbear body writes it , a normal session in the same
-directory never clobbers the resume target.
+Resume-mode ALSO needs `scripts/rc-session-capture-hook` wired as a **SessionStart hook** so the
+live session id gets recorded (to `~/.claude/rc-session-<name>`) for the guard to resume. Add it to
+the project's `.claude/settings.json` (in `CLAUDE_RC_DIR`) or global `~/.claude/settings.json`, using
+the **absolute path** to the hook (the hook runs from the agent's cwd, which is not the skill dir):
 
-Run `scripts/waterbear-install` with no comment-reading needed; its header documents every env var.
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "/ABSOLUTE/PATH/TO/waterbear/scripts/rc-session-capture-hook", "timeout": 10 } ] }
+    ]
+  }
+}
+```
+
+If a `SessionStart` array already exists, append this hook object to it rather than replacing it. The
+hook is gated on `CLAUDE_RC_NAME`, so only the waterbear body writes the id file , a normal session
+in the same directory never clobbers the resume target.
+
 Attach with `tmux attach -t <name>`; stop with `launchctl bootout gui/$(id -u)/com.<user>.claude-rc.<name>`.
+Every env var is documented in the installer's header.
 
 ## Quick reference
 
