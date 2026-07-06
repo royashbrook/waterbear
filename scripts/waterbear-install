@@ -85,6 +85,25 @@ RESUME_WAKE="${CLAUDE_RC_RESUME_WAKE:-}"
 SESSION_FILE="${CLAUDE_RC_SESSION_FILE:-$HOME/.claude/rc-session-$NAME}"
 command -v tmux   >/dev/null 2>&1 || exit 78
 command -v claude >/dev/null 2>&1 || exit 78
+
+# crashloop / auth-stuck detection: if the session keeps dying fast (auth-expiry is the usual cause,
+# and the guard can't drive a browser /login), stop hammering, notify the human once, and back off.
+mkdir -p "$HOME/.claude"
+LAUNCH_LOG="$HOME/.claude/rc-launches-$NAME"; STUCK_FLAG="$HOME/.claude/rc-stuck-$NAME"
+NOW=$(date +%s)
+printf '%s\n' "$NOW" >> "$LAUNCH_LOG"
+RECENT=$(awk -v n="$NOW" '($1+0) > n-120' "$LAUNCH_LOG" 2>/dev/null || true)
+printf '%s\n' "$RECENT" > "$LAUNCH_LOG"
+if [ "$(printf '%s\n' "$RECENT" | grep -c .)" -ge 4 ]; then
+  if [ ! -f "$STUCK_FLAG" ]; then
+    : > "$STUCK_FLAG"
+    command -v osascript >/dev/null 2>&1 && osascript -e "display notification \"$NAME keeps dying, likely an expired login. run: claude then /login at the machine.\" with title \"waterbear: $NAME needs a re-login\"" >/dev/null 2>&1 || true
+  fi
+  sleep 300   # back off so launchd doesn't respawn us in a tight loop until the human reauths
+  exit 0
+fi
+rm -f "$STUCK_FLAG" 2>/dev/null || true   # a healthy start clears the stuck flag
+
 if ! tmux has-session -t "$NAME" 2>/dev/null; then
   # resume the prior conversation by id if configured AND we have a captured id; else fresh.
   # tmux session name is $NAME (short); the remote-control display TITLE is separate (may have spaces).
