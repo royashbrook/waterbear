@@ -193,3 +193,12 @@ on another OS can read `scripts/waterbear-install` and generate its own equivale
   which may be a different agent. Resume a SPECIFIC id (what the capture hook records).
 - **Resume-mode with no capture hook.** No recorded id means nothing to resume, it silently
   falls back to a fresh start.
+- **Hand-setting the resume id while several same-named bodies are alive.** The id file names ONE
+  session. If you've run multiple bodies for the same name over a day (a cloud one, a local one, a
+  throwaway test one, the one you actually worked in), the id your env reports (`$CLAUDE_CODE_SESSION_ID`)
+  is just whichever body you happen to be in right now, NOT necessarily the one you want to keep, and a
+  wrong id resumes the wrong body silently (it's still "a" valid session, so nothing errors). The human's
+  pinned / actively-used session is ground truth for which one to continue, read the id from inside that
+  exact session, or don't hand-edit at all: the capture hook self-heals the LIVE session's id on every
+  start, so the safest path is to just keep using the body you want and let its hook keep the id file
+  current.

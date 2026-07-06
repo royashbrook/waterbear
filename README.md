@@ -125,6 +125,11 @@ Resume replays the full transcript into context every time, so context grows wit
 resume for continuity across crashes, and periodically start a clean session to shed weight. Resume is
 for recovery, not infinite accumulation.
 
+Running several bodies for one name over time? The id file names ONE session, and a wrong id resumes
+the wrong body silently. Keep using the body you want and let its capture hook keep the id current;
+don't hand-set the id from a session you're not sure is the right one. See
+[`SKILL.md`](SKILL.md) → Common mistakes.
+
 ## other operating systems
 
 This is a macOS/launchd reference implementation. The pattern ports directly: swap the LaunchAgent for
