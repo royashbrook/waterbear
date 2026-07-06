@@ -76,6 +76,12 @@ claude.ai). Stop with `launchctl bootout gui/$(id -u)/com.<user>.claude-rc.myage
 **Prereqs:** the `claude` CLI (run `claude` once to log in: waterbear reuses your login, it does not
 handle auth) and `tmux` (`brew install tmux`).
 
+**Auth expiry:** the CLI runs on your subscription login (OAuth), which expires now and then.
+waterbear can respawn the process but cannot drive a browser re-login, so once in a while an
+auth-expired body is stuck until you run `claude` + `/login` at the machine. Expected with a
+subscription backbone (a detect-and-notify guard is tracked at
+[issue #2](https://github.com/royashbrook/waterbear/issues/2)).
+
 ## how it works
 
 Four pieces, each doing one job:
