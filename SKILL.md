@@ -36,12 +36,14 @@ consequences worth stating up front:
   reconstitutes the agent from durable state; only the in-flight desktop chat is what you'd lose.)
 - **cloud / Claude Code on web**: not applicable, there is no local machine, launchd, or tmux to
   keep alive. waterbear is for a session running on your own computer.
-- **auth expiry needs an interactive re-login (waterbear can't self-heal it)**: the CLI runs on
-  your subscription login (OAuth), which expires periodically. usually it refreshes silently, but
-  sometimes it drops to a state needing an interactive `/login` (browser). launchd + tmux can
-  respawn the process but cannot drive a browser auth, so an auth-expired respawn is stuck until you
-  run `claude` + `/login` at the machine. expected with a subscription backbone, not a bug (API-key
-  auth would avoid it but flips billing to metered). detect-and-notify is tracked at issue #2.
+- **auth expiry needs an interactive re-login**: the CLI runs on your subscription login (OAuth),
+  which expires periodically. when it does, the session STAYS ALIVE and shows an auth error on each
+  request, so it announces itself (you see it via remote-control on your phone or desktop), it does
+  NOT silently die. run `claude` + `/login` at the machine to clear it. waterbear can't self-heal
+  this (launchd cannot drive a browser auth), and it's expected with a subscription backbone, not a
+  bug (API-key auth would avoid it but flips billing to metered). Separately, the guard has a
+  crashloop net (notify + back off) for a session that genuinely dies and respawns in a loop, e.g. a
+  bad resume id or corrupt state; an expired login does not trigger it.
 
 If you do not want an always-on process tied to your mac, do not install it.
 

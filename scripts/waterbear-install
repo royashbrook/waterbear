@@ -86,8 +86,10 @@ SESSION_FILE="${CLAUDE_RC_SESSION_FILE:-$HOME/.claude/rc-session-$NAME}"
 command -v tmux   >/dev/null 2>&1 || exit 78
 command -v claude >/dev/null 2>&1 || exit 78
 
-# crashloop / auth-stuck detection: if the session keeps dying fast (auth-expiry is the usual cause,
-# and the guard can't drive a browser /login), stop hammering, notify the human once, and back off.
+# crashloop detection: if the session GENUINELY dies + respawns fast (a bad resume id, corrupt state,
+# disk full, etc.), stop hammering, notify the human once, and back off. NOTE: an expired login does
+# NOT trigger this , that leaves the session ALIVE showing an auth error (visible via remote-control),
+# so it announces itself and a human clears it with claude + /login.
 mkdir -p "$HOME/.claude"
 LAUNCH_LOG="$HOME/.claude/rc-launches-$NAME"; STUCK_FLAG="$HOME/.claude/rc-stuck-$NAME"
 NOW=$(date +%s)
