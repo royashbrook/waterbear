@@ -113,15 +113,22 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
   if [ "$RESUME" = "1" ] && [ -s "$SESSION_FILE" ]; then
     SID="$(head -n1 "$SESSION_FILE" | tr -d '[:space:]')"
   fi
+  # -e "CLAUDE_RC_NAME=$NAME" is LOAD-BEARING when more than one waterbear body runs on the same
+  # machine. they share one tmux server; the FIRST body to boot seeds the server's global
+  # environment with its own CLAUDE_RC_NAME, and every later `new-session` inherits it, so all
+  # panes would otherwise see the first body's name. the SessionStart capture hook keys the
+  # resume-id file on CLAUDE_RC_NAME, so without this every body writes rc-session-<first>, the
+  # others' files never update, and the next boot resumes crossed ids (body B comes up as body A).
+  # setting it per-session overrides the poisoned server env. (single-body users never hit this.)
   if [ -n "$SID" ]; then
     # consume the id first: if this resume is what's crashing, the next respawn finds no id
     # and falls back to a fresh start instead of looping on a bad resume. a SUCCESSFUL resume
     # re-runs SessionStart, and the capture hook rewrites the id file with the live session.
     mv -f "$SESSION_FILE" "$SESSION_FILE.consumed" 2>/dev/null || true
-    tmux new-session -d -s "$NAME" -c "$WORKDIR" "claude --remote-control \"$TITLE\" --resume $SID"
+    tmux new-session -d -s "$NAME" -e "CLAUDE_RC_NAME=$NAME" -c "$WORKDIR" "claude --remote-control \"$TITLE\" --resume $SID"
     NUDGE="$RESUME_WAKE"
   else
-    tmux new-session -d -s "$NAME" -c "$WORKDIR" "claude --remote-control \"$TITLE\""
+    tmux new-session -d -s "$NAME" -e "CLAUDE_RC_NAME=$NAME" -c "$WORKDIR" "claude --remote-control \"$TITLE\""
     NUDGE="$WAKE"
   fi
   # launchd has no hands. if a prompt is set, type it into the session once its UI has settled
