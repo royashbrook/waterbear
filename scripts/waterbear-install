@@ -55,6 +55,7 @@ WORKDIR="${CLAUDE_RC_DIR:-$HOME}"
 WAKE="${CLAUDE_RC_WAKE:-}"
 RESUME="${CLAUDE_RC_RESUME:-}"
 RESUME_WAKE="${CLAUDE_RC_RESUME_WAKE:-}"
+DOORBELL="${CLAUDE_RC_DOORBELL:-}"
 USER_ID="$(id -u)"
 SHORTUSER="$(id -un | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')"
 LABEL="com.${SHORTUSER}.claude-rc.${NAME}"
@@ -83,6 +84,7 @@ WAKE="${CLAUDE_RC_WAKE:-}"
 RESUME="${CLAUDE_RC_RESUME:-}"
 RESUME_WAKE="${CLAUDE_RC_RESUME_WAKE:-}"
 SESSION_FILE="${CLAUDE_RC_SESSION_FILE:-$HOME/.claude/rc-session-$NAME}"
+DOORBELL="${CLAUDE_RC_DOORBELL:-}"   # optional: a signal file the GUARD watches; a new line => wake the session
 command -v tmux   >/dev/null 2>&1 || exit 78
 command -v claude >/dev/null 2>&1 || exit 78
 
@@ -156,7 +158,29 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
     tmux send-keys -t "$NAME" Enter   # race-defeat: an empty Enter is a no-op if already submitted
   fi
 fi
+# doorbell (optional): the GUARD, not the session, watches the signal file. so it survives a
+# client patch that would kill a session-owned watcher, and the session burns ZERO tokens sitting
+# on a tail. on a new line it send-keys a wake into the live session. this is the "watch in the
+# durable layer, only touch the session on a real event" model. start at EOF so old rings are not
+# replayed. (idle-detection before the send-keys is a known TODO: a ring mid-generation queues.)
+db_off=0
+if [ -n "$DOORBELL" ] && [ -f "$DOORBELL" ]; then
+  db_off=$(wc -c < "$DOORBELL" 2>/dev/null | tr -d ' ' || echo 0)
+fi
 while tmux has-session -t "$NAME" 2>/dev/null; do
+  if [ -n "$DOORBELL" ] && [ -f "$DOORBELL" ]; then
+    cur=$(wc -c < "$DOORBELL" 2>/dev/null | tr -d ' ' || echo 0)
+    cur=${cur:-0}; db_off=${db_off:-0}
+    if [ "$cur" -lt "$db_off" ]; then db_off=0; fi          # file truncated / rotated: reset
+    if [ "$cur" -gt "$db_off" ]; then
+      ring=$(tail -c "+$((db_off + 1))" "$DOORBELL" 2>/dev/null | tr '\n' ' ' | cut -c1-400 || true)
+      db_off=$cur
+      if [ -n "$ring" ]; then
+        tmux send-keys -t "$NAME" -l "[doorbell] sibling ring, check the bus: $ring" 2>/dev/null || true
+        sleep 1; tmux send-keys -t "$NAME" Enter 2>/dev/null || true
+      fi
+    fi
+  fi
   sleep 10
 done
 exit 0
@@ -183,6 +207,7 @@ cat > "$PLIST" <<PLIST_EOF
     <key>CLAUDE_RC_WAKE</key>        <string>${WAKE}</string>
     <key>CLAUDE_RC_RESUME</key>      <string>${RESUME}</string>
     <key>CLAUDE_RC_RESUME_WAKE</key> <string>${RESUME_WAKE}</string>
+    <key>CLAUDE_RC_DOORBELL</key>    <string>${DOORBELL}</string>
     <key>HOME</key>                  <string>${HOME}</string>
   </dict>
   <key>StandardOutPath</key>  <string>/tmp/${LABEL}.log</string>
