@@ -151,6 +151,27 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
       sleep 1
     done
     sleep 2
+    # a LARGE session resumes behind an interactive "Resume from summary / Resume full session /
+    # Don't ask me again" menu. a blind wake keystroke can't navigate it (it stalls at the modal or
+    # picks an option by accident). detect it and choose the recommended SUMMARY option, which also
+    # sheds the bloat. option 1 is pre-highlighted, so a single Enter selects it.
+    cur="$(tmux capture-pane -pt "$NAME" 2>/dev/null || true)"
+    case "$cur" in
+      *"Resume from summary"*)
+        tmux send-keys -t "$NAME" Enter 2>/dev/null || true
+        sleep 3
+        ;;
+    esac
+    # CLEAR the input line before waking. if the prior (stalled) session left text typed in the input
+    # box, the wake's Enter would submit that text concatenated with the wake, so a stale command
+    # could fire on respawn. C-u kills the line so the wake lands in an empty prompt. (verified: C-u
+    # alone clears cleanly; Escape/Ctrl-C were rejected, Escape is readline's meta-prefix and mangles
+    # the following keystrokes, and a double Ctrl-C can exit the session.)
+    # NOTE: this covers stale text in the INPUT LINE. It does NOT cover already-QUEUED messages (text
+    # submitted-to-queue while a prior turn ran, which auto-send on resume). That is the harder case,
+    # tracked separately, C-u cannot reach the queue and no clean guard-only flush exists yet.
+    tmux send-keys -t "$NAME" C-u 2>/dev/null || true
+    sleep 1
     tmux send-keys -t "$NAME" -l "$NUDGE"
     sleep 1
     tmux send-keys -t "$NAME" Enter
