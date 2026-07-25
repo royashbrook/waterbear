@@ -118,36 +118,48 @@ start on the next respawn.
 | `CLAUDE_RC_RESUME` | `1` = resume the prior conversation by id instead of a fresh one |
 | `CLAUDE_RC_RESUME_WAKE` | prompt typed AFTER a resume (re-arm session-scoped rails) |
 | `CLAUDE_RC_SESSION_FILE` | override the id file path (default `~/.claude/rc-session-<name>`) |
-| `CLAUDE_RC_NET_PROBE` | IP the guard checks for reachability (default `1.1.1.1`; a numeric IP avoids a DNS dependency) |
-| `CLAUDE_RC_OUTAGE_RESPAWN_SECS` | a network outage longer than this, once it recovers, triggers a respawn (default `600`) |
+| `CLAUDE_RC_CONNECT_URL` | URL the guard fetches to test real internet (default `https://1.1.1.1/`; an IP avoids a DNS dependency) |
+| `CLAUDE_RC_NET_CHECK_SECS` | how often to probe connectivity in the watch loop (default `30`) |
+| `CLAUDE_RC_OUTAGE_RESPAWN_SECS` | an outage longer than this, once internet recovers, triggers a respawn (default `600`; set `0` to respawn on any connectivity blip) |
 
 ## network recovery
 
 Remote control registers when the process starts and rides a persistent connection. A **sustained**
-network outage kills that connection and it does **not** reconnect on its own: the process stays alive
-but is reachable only from the local tmux, which defeats the whole point. This is the failure you hit
-after travel (offline in transit, online at the destination) or a reboot where the network hadn't
-settled yet.
+loss of real internet kills that connection and it does **not** reconnect on its own: the process stays
+alive but is reachable only from the local tmux, which defeats the whole point. You hit this after
+travel (offline in transit, online at the destination), a reboot where the network hadn't settled,
+**captive-portal wifi** (hotel / airport), or a **router that's up with a dead WAN**.
 
 There's no external signal for "is remote control up" (a live remote-control session can show zero
-persistent connections), so the guard keys off the thing that IS observable and IS the cause: network
-reachability, via `scutil -r` (a local, instant route check that works while offline). Two behaviors:
+persistent connections), so the guard keys off the actual cause: **real internet reachability**. It
+does a genuine connectivity probe (a TLS fetch of `CLAUDE_RC_CONNECT_URL`, an IP so there's no DNS
+dependency), not a route check, because a route check reports "wifi connected but no internet" as fine.
+The TLS fetch only succeeds with working internet: behind a captive portal the handshake fails or is
+redirected, and with no route it can't connect. This is the same mechanism the OS uses to light its
+"no internet" indicator. Four behaviors, all feeding one respawn (respawn re-registers remote control):
 
-- **launch-gate.** The guard won't start `claude --remote-control` into a dead network. If the network
-  is down at launch it waits (up to ~15 min) for it to come back, then a short settle, so remote
-  control always registers into a live network. This is the reboot case.
-- **recovery respawn.** While running, the guard watches reachability. A down→up transition after an
-  outage longer than `CLAUDE_RC_OUTAGE_RESPAWN_SECS` (default 10 min, matching remote control's own
-  timeout) respawns the session, which re-registers remote control. Short blips stay under the
-  threshold (remote control self-heals on sleep/wake) and are ignored. This is the travel case.
-- **suspend/wake respawn.** The guard can't poll while the machine is asleep, so it also watches for a
-  time jump: a loop that took far longer than its ~10s interval means the machine was suspended that
-  long. Past the same threshold, it respawns. This is the "closed the laptop for an hour, remote
-  control is dead on wake" case that a live poll can't see (the poll was frozen too).
+- **launch-gate.** The guard won't start `claude --remote-control` into a dead network, launching remote
+  control without internet is guaranteed to fail. It **waits** for real connectivity (up to ~1 hour)
+  before launching, then a short settle. No delay when the internet is already up. Fixes the reboot and
+  wake-with-no-network cases.
+- **recovery respawn.** While running, it probes connectivity every `CLAUDE_RC_NET_CHECK_SECS`. A down→up
+  transition after an outage longer than `CLAUDE_RC_OUTAGE_RESPAWN_SECS` (default 10 min, matching
+  remote control's own timeout) respawns. Short blips stay under the threshold (remote control self-heals
+  on brief drops) and are ignored; the threshold also debounces a single flaky probe. Fixes travel and
+  captive-portal / dead-WAN wifi (once real internet returns).
+- **suspend/wake respawn.** The guard can't probe while the machine is asleep, so it also watches for a
+  time jump: a loop that took far longer than its interval means the machine was suspended that long.
+  Past the same threshold, it respawns. Fixes "closed the laptop for an hour, remote control is dead on
+  wake", the case a live probe can't see (it was frozen too).
+- **poll backstop.** If the launch-gate ever gives up (its ~1h cap) and launches into no-internet, the
+  recovery probe respawns it once internet returns.
 
-`scutil -r` reflects route/interface state, which is exactly the travel and reboot failures. It does
-not catch a captive portal or a router that's up with no internet (the route exists), those are out of
-scope.
+Set `CLAUDE_RC_OUTAGE_RESPAWN_SECS=0` to respawn on **any** connectivity blip (trades churn for
+immediacy). Known limit: this is polling, so recovery is within `CLAUDE_RC_NET_CHECK_SECS` of internet
+returning, not instant (macOS fires an event on network *config* changes but not on "internet came back
+on the same wifi", so a poll is required for the captive-portal case). A hang with no connectivity change
+at all (an internal client wedge, not network-caused) has no signal and isn't auto-caught, use the
+deliberate-restart procedure below.
 
 ## recovery: when to deliberately restart
 
