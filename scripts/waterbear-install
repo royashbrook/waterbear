@@ -196,8 +196,17 @@ db_off=0
 if [ -n "$DOORBELL" ] && [ -f "$DOORBELL" ]; then
   db_off=$(wc -c < "$DOORBELL" 2>/dev/null | tr -d ' ' || echo 0)
 fi
-net_state=up; down_since=0
+net_state=up; down_since=0; last_tick=$(date +%s)
 while tmux has-session -t "$NAME" 2>/dev/null; do
+  # SUSPEND/WAKE RESPAWN: date is wall-clock, so a loop gap far larger than our ~10s interval means the
+  # machine was suspended (sleep/hibernate) for that long. RC dies across a long suspend and doesn't
+  # reconnect, and the guard was frozen too so the network poll below never observed a down->up (it
+  # wasn't running). If the gap is past the threshold, respawn. This is the case a pure poll misses.
+  now=$(date +%s); gap=$(( now - last_tick )); last_tick=$now
+  if [ "$gap" -ge "$OUTAGE_RESPAWN_SECS" ]; then
+    tmux kill-session -t "$NAME" 2>/dev/null || true
+    break
+  fi
   if [ -n "$DOORBELL" ] && [ -f "$DOORBELL" ]; then
     cur=$(wc -c < "$DOORBELL" 2>/dev/null | tr -d ' ' || echo 0)
     cur=${cur:-0}; db_off=${db_off:-0}

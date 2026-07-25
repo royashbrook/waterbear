@@ -140,6 +140,10 @@ reachability, via `scutil -r` (a local, instant route check that works while off
   outage longer than `CLAUDE_RC_OUTAGE_RESPAWN_SECS` (default 10 min, matching remote control's own
   timeout) respawns the session, which re-registers remote control. Short blips stay under the
   threshold (remote control self-heals on sleep/wake) and are ignored. This is the travel case.
+- **suspend/wake respawn.** The guard can't poll while the machine is asleep, so it also watches for a
+  time jump: a loop that took far longer than its ~10s interval means the machine was suspended that
+  long. Past the same threshold, it respawns. This is the "closed the laptop for an hour, remote
+  control is dead on wake" case that a live poll can't see (the poll was frozen too).
 
 `scutil -r` reflects route/interface state, which is exactly the travel and reboot failures. It does
 not catch a captive portal or a router that's up with no internet (the route exists), those are out of
