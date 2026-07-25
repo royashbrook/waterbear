@@ -129,14 +129,20 @@ fi
 rm -f "$STUCK_FLAG" 2>/dev/null || true   # a healthy start clears the stuck flag
 
 if ! tmux has-session -t "$NAME" 2>/dev/null; then
-  # LAUNCH-GATE: never start claude --remote-control into a dead/unsettled network. RC registers at
-  # process start; launched offline (a reboot before the network is up, a machine woken mid-travel)
-  # it registers into nothing and doesn't self-heal. If the network is down, wait for it (bounded),
-  # then a short settle so a just-up interface is really up before RC registers. No delay when the
-  # network is already up, so the common case is unaffected.
+  # LAUNCH-GATE: never start claude --remote-control into a dead network. RC registers at process
+  # start; launched offline (reboot before the network is up, woken mid-travel, woken with no signal)
+  # it registers into nothing and doesn't self-heal. So WAIT for the network, launching RC without it
+  # is guaranteed to fail, so waiting always beats launching. The guard just sleeps while it waits and
+  # launchd's KeepAlive sees it running (no duplicate). No delay at all when the network is already up.
+  # After a long cap it launches anyway as a last resort (the watch-loop poll then recovers it once the
+  # network returns), but the point is to sit here until the network is actually back.
   if ! net_up; then
-    for _ in $(seq 1 180); do net_up && break; sleep 5; done   # wait up to ~15 min for the network
-    sleep 3
+    waited=0
+    until net_up; do
+      sleep 5; waited=$((waited + 5))
+      [ "$waited" -ge 3600 ] && break   # last resort after ~1h; the poll backstops on later recovery
+    done
+    sleep 3   # settle so a just-up interface is really up before RC registers
   fi
   # resume the prior conversation by id if configured AND we have a captured id; else fresh.
   # tmux session name is $NAME (short); the remote-control display TITLE is separate (may have spaces).
