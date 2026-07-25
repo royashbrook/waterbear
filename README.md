@@ -118,6 +118,63 @@ start on the next respawn.
 | `CLAUDE_RC_RESUME` | `1` = resume the prior conversation by id instead of a fresh one |
 | `CLAUDE_RC_RESUME_WAKE` | prompt typed AFTER a resume (re-arm session-scoped rails) |
 | `CLAUDE_RC_SESSION_FILE` | override the id file path (default `~/.claude/rc-session-<name>`) |
+| `CLAUDE_RC_NET_PROBE` | IP the guard checks for reachability (default `1.1.1.1`; a numeric IP avoids a DNS dependency) |
+| `CLAUDE_RC_OUTAGE_RESPAWN_SECS` | a network outage longer than this, once it recovers, triggers a respawn (default `600`) |
+
+## network recovery
+
+Remote control registers when the process starts and rides a persistent connection. A **sustained**
+network outage kills that connection and it does **not** reconnect on its own: the process stays alive
+but is reachable only from the local tmux, which defeats the whole point. This is the failure you hit
+after travel (offline in transit, online at the destination) or a reboot where the network hadn't
+settled yet.
+
+There's no external signal for "is remote control up" (a live remote-control session can show zero
+persistent connections), so the guard keys off the thing that IS observable and IS the cause: network
+reachability, via `scutil -r` (a local, instant route check that works while offline). Two behaviors:
+
+- **launch-gate.** The guard won't start `claude --remote-control` into a dead network. If the network
+  is down at launch it waits (up to ~15 min) for it to come back, then a short settle, so remote
+  control always registers into a live network. This is the reboot case.
+- **recovery respawn.** While running, the guard watches reachability. A down→up transition after an
+  outage longer than `CLAUDE_RC_OUTAGE_RESPAWN_SECS` (default 10 min, matching remote control's own
+  timeout) respawns the session, which re-registers remote control. Short blips stay under the
+  threshold (remote control self-heals on sleep/wake) and are ignored. This is the travel case.
+
+`scutil -r` reflects route/interface state, which is exactly the travel and reboot failures. It does
+not catch a captive portal or a router that's up with no internet (the route exists), those are out of
+scope.
+
+## recovery: when to deliberately restart
+
+Waterbear is crash-resilience, but the more common real-world need is a **deliberate restart** of a
+wedged-but-alive session. Some failures can't be fixed from inside the session because the thing that
+broke was acquired at process start and can't be re-acquired in-process:
+
+- **remote control dropped** (the network cases above; also just a long sleep).
+- **an MCP connector dropped** (a `... MCP server disconnected` notice mid-session; the account-level
+  connector is still fine, but this process's client is gone and nothing re-attaches it).
+- **the session is wedged** (frozen client, stuck at a login prompt after a network blip).
+- **the CLI is stale** (a respawn comes up on the newer installed version, so restart doubles as the
+  upgrade path).
+
+The fix in all of these is the same: kill the session and let the guard resume it. A respawn is ~15s
+and comes back mid-thread as the same session. Before you pull the pin:
+
+1. **Confirm the id file points at THIS session.** `~/.claude/rc-session-<name>` should hold the
+   current session id and the tmux pane's pid should be your own `claude` process. A wrong id resumes
+   a different conversation and loses yours.
+2. **Flush first.** A respawn is a fresh context load, not a guarantee: commit and push anything you
+   care about (a clean `git status` in every repo you touched), because resume replays the transcript
+   but a fresh-fallback does not.
+3. **Kill the tmux session, not just the pid:** `tmux kill-session -t <name>`. That's the exact
+   condition the guard's loop watches, so there's no window where the pane is dead but the guard is
+   still looping.
+4. Then launchd re-runs the guard, which resumes the pinned id and types the wake.
+
+Two safety properties make this safe to do on purpose: the resume id is **consumed before use** (a bad
+id falls through to a fresh start instead of crashlooping), and the crashloop backoff needs **4
+launches in 120s** before it trips, so a single deliberate kill never does.
 
 ## the resume caveat
 

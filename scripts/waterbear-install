@@ -88,6 +88,26 @@ DOORBELL="${CLAUDE_RC_DOORBELL:-}"   # optional: a signal file the GUARD watches
 command -v tmux   >/dev/null 2>&1 || exit 78
 command -v claude >/dev/null 2>&1 || exit 78
 
+# NETWORK RECOVERY. Remote control registers at process start and rides a persistent connection.
+# A SUSTAINED network outage (travel, a reboot before the network settles) kills that connection and
+# it does NOT reconnect: the process stays alive but is reachable only from the local tmux, which
+# defeats the point. There is no external signal for "is remote control up" (verified: a live RC
+# session can show zero persistent connections), so we key off the thing that IS observable and IS
+# the actual failure cause: network reachability. `scutil -r` is a local, instant route check that
+# works while offline (it just reports not-reachable). Probe a public IP to avoid a DNS dependency.
+NET_PROBE="${CLAUDE_RC_NET_PROBE:-1.1.1.1}"
+# RC times out after ~10 min offline; only a down->up transition past this respawns (short blips that
+# RC self-heals on sleep/wake stay under it and are ignored).
+OUTAGE_RESPAWN_SECS="${CLAUDE_RC_OUTAGE_RESPAWN_SECS:-600}"
+net_up() {
+  local r; r="$(scutil -r "$NET_PROBE" 2>/dev/null)" || return 1
+  case "$r" in
+    *[Nn]ot' '[Rr]eachable*) return 1 ;;
+    *[Rr]eachable*)          return 0 ;;
+    *)                       return 1 ;;
+  esac
+}
+
 # crashloop detection: if the session GENUINELY dies + respawns fast (a bad resume id, corrupt state,
 # disk full, etc.), stop hammering, notify the human once, and back off. NOTE: an expired login does
 # NOT trigger this , that leaves the session ALIVE showing an auth error (visible via remote-control),
@@ -109,6 +129,15 @@ fi
 rm -f "$STUCK_FLAG" 2>/dev/null || true   # a healthy start clears the stuck flag
 
 if ! tmux has-session -t "$NAME" 2>/dev/null; then
+  # LAUNCH-GATE: never start claude --remote-control into a dead/unsettled network. RC registers at
+  # process start; launched offline (a reboot before the network is up, a machine woken mid-travel)
+  # it registers into nothing and doesn't self-heal. If the network is down, wait for it (bounded),
+  # then a short settle so a just-up interface is really up before RC registers. No delay when the
+  # network is already up, so the common case is unaffected.
+  if ! net_up; then
+    for _ in $(seq 1 180); do net_up && break; sleep 5; done   # wait up to ~15 min for the network
+    sleep 3
+  fi
   # resume the prior conversation by id if configured AND we have a captured id; else fresh.
   # tmux session name is $NAME (short); the remote-control display TITLE is separate (may have spaces).
   SID=""
@@ -167,6 +196,7 @@ db_off=0
 if [ -n "$DOORBELL" ] && [ -f "$DOORBELL" ]; then
   db_off=$(wc -c < "$DOORBELL" 2>/dev/null | tr -d ' ' || echo 0)
 fi
+net_state=up; down_since=0
 while tmux has-session -t "$NAME" 2>/dev/null; do
   if [ -n "$DOORBELL" ] && [ -f "$DOORBELL" ]; then
     cur=$(wc -c < "$DOORBELL" 2>/dev/null | tr -d ' ' || echo 0)
@@ -180,6 +210,22 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
         sleep 1; tmux send-keys -t "$NAME" Enter 2>/dev/null || true
       fi
     fi
+  fi
+  # NETWORK-RECOVERY RESPAWN: a sustained outage kills remote control and it doesn't reconnect. Watch
+  # for a down->up transition; if the outage was long enough that RC is surely dead, respawn by killing
+  # the session, the `while` condition then fails, the guard exits, and launchd re-runs it, which
+  # relaunches through the launch-gate and re-registers RC. Short blips stay under the threshold (RC
+  # self-heals on sleep/wake) and never trigger.
+  if net_up; then
+    if [ "$net_state" = down ]; then
+      net_state=up
+      if [ "$(( $(date +%s) - down_since ))" -ge "$OUTAGE_RESPAWN_SECS" ]; then
+        tmux kill-session -t "$NAME" 2>/dev/null || true
+        break
+      fi
+    fi
+  elif [ "$net_state" = up ]; then
+    net_state=down; down_since=$(date +%s)
   fi
   sleep 10
 done
