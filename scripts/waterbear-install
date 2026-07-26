@@ -88,6 +88,28 @@ DOORBELL="${CLAUDE_RC_DOORBELL:-}"   # optional: a signal file the GUARD watches
 command -v tmux   >/dev/null 2>&1 || exit 78
 command -v claude >/dev/null 2>&1 || exit 78
 
+# NETWORK RECOVERY. Remote control registers at process start and rides a persistent connection.
+# A SUSTAINED loss of ACTUAL internet (travel, a reboot before the network settles, a captive-portal
+# wifi, a router that's up with a dead WAN) kills that connection and it does NOT reconnect: the
+# process stays alive but is reachable only from the local tmux, which defeats the point. There is no
+# external signal for "is remote control up" (verified: a live RC session can show zero persistent
+# connections), so we key off the actual cause: real internet reachability.
+#
+# net_up is a genuine connectivity PROBE, not a route check. A route check (scutil) reports "wifi
+# connected but no internet" as reachable, which is the most common failure (hotel/captive wifi, WAN
+# down). A TLS fetch to a real host only succeeds with working internet: behind a captive portal the
+# handshake fails or is redirected, and with no route it can't connect at all. Uses an IP (no DNS
+# dependency). This is the same approach the OS itself uses to light the "no internet" indicator.
+CONNECT_URL="${CLAUDE_RC_CONNECT_URL:-https://1.1.1.1/}"
+NET_CHECK_SECS="${CLAUDE_RC_NET_CHECK_SECS:-30}"   # how often to probe connectivity in the watch loop
+# RC times out after ~10 min offline; only a down->up transition past this respawns (short blips that
+# RC self-heals on sleep/wake stay under it and are ignored).
+OUTAGE_RESPAWN_SECS="${CLAUDE_RC_OUTAGE_RESPAWN_SECS:-600}"
+net_up() {
+  command -v curl >/dev/null 2>&1 || return 0   # no curl: disable net detection, never false-respawn
+  curl -sf -I --max-time 5 "$CONNECT_URL" >/dev/null 2>&1
+}
+
 # crashloop detection: if the session GENUINELY dies + respawns fast (a bad resume id, corrupt state,
 # disk full, etc.), stop hammering, notify the human once, and back off. NOTE: an expired login does
 # NOT trigger this , that leaves the session ALIVE showing an auth error (visible via remote-control),
@@ -109,6 +131,21 @@ fi
 rm -f "$STUCK_FLAG" 2>/dev/null || true   # a healthy start clears the stuck flag
 
 if ! tmux has-session -t "$NAME" 2>/dev/null; then
+  # LAUNCH-GATE: never start claude --remote-control into a dead network. RC registers at process
+  # start; launched offline (reboot before the network is up, woken mid-travel, woken with no signal)
+  # it registers into nothing and doesn't self-heal. So WAIT for the network, launching RC without it
+  # is guaranteed to fail, so waiting always beats launching. The guard just sleeps while it waits and
+  # launchd's KeepAlive sees it running (no duplicate). No delay at all when the network is already up.
+  # After a long cap it launches anyway as a last resort (the watch-loop poll then recovers it once the
+  # network returns), but the point is to sit here until the network is actually back.
+  if ! net_up; then
+    waited=0
+    until net_up; do
+      sleep 5; waited=$((waited + 5))
+      [ "$waited" -ge 3600 ] && break   # last resort after ~1h; the poll backstops on later recovery
+    done
+    sleep 3   # settle so a just-up interface is really up before RC registers
+  fi
   # resume the prior conversation by id if configured AND we have a captured id; else fresh.
   # tmux session name is $NAME (short); the remote-control display TITLE is separate (may have spaces).
   SID=""
@@ -151,6 +188,20 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
       sleep 1
     done
     sleep 2
+    # A large session resumes behind a "Resume from summary / Resume full / Don't ask again" prompt
+    # that a blind keystroke can't navigate. If it's showing, pick the recommended SUMMARY option
+    # (option 1 is pre-highlighted, so Enter selects it) and let it load.
+    if tmux capture-pane -pt "$NAME" 2>/dev/null | grep -q "Resume from summary"; then
+      tmux send-keys -t "$NAME" Enter
+      sleep 3
+    fi
+    # A resume can restore a message you had queued before the session died. SUBMIT it first (Enter),
+    # so your own pending input runs, THEN send the wake on a now-empty line, so the wake doesn't
+    # concatenate onto (and garble) your text. On an empty box the leading Enter is a harmless no-op.
+    # NOTE: this deliberately re-sends whatever was queued. That's the intended behavior here (it's
+    # something you already typed), see README "the wake re-sends queued input" for the caveat.
+    tmux send-keys -t "$NAME" Enter
+    sleep 2
     tmux send-keys -t "$NAME" -l "$NUDGE"
     sleep 1
     tmux send-keys -t "$NAME" Enter
@@ -167,7 +218,17 @@ db_off=0
 if [ -n "$DOORBELL" ] && [ -f "$DOORBELL" ]; then
   db_off=$(wc -c < "$DOORBELL" 2>/dev/null | tr -d ' ' || echo 0)
 fi
+net_state=up; down_since=0; last_tick=$(date +%s); last_probe=0
 while tmux has-session -t "$NAME" 2>/dev/null; do
+  # SUSPEND/WAKE RESPAWN: date is wall-clock, so a loop gap far larger than our ~10s interval means the
+  # machine was suspended (sleep/hibernate) for that long. RC dies across a long suspend and doesn't
+  # reconnect, and the guard was frozen too so the network poll below never observed a down->up (it
+  # wasn't running). If the gap is past the threshold, respawn. This is the case a pure poll misses.
+  now=$(date +%s); gap=$(( now - last_tick )); last_tick=$now
+  if [ "$gap" -ge "$OUTAGE_RESPAWN_SECS" ]; then
+    tmux kill-session -t "$NAME" 2>/dev/null || true
+    break
+  fi
   if [ -n "$DOORBELL" ] && [ -f "$DOORBELL" ]; then
     cur=$(wc -c < "$DOORBELL" 2>/dev/null | tr -d ' ' || echo 0)
     cur=${cur:-0}; db_off=${db_off:-0}
@@ -179,6 +240,28 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
         tmux send-keys -t "$NAME" -l "[doorbell] sibling ring, check the bus: $ring" 2>/dev/null || true
         sleep 1; tmux send-keys -t "$NAME" Enter 2>/dev/null || true
       fi
+    fi
+  fi
+  # NETWORK-RECOVERY RESPAWN: a sustained loss of real internet kills remote control and it doesn't
+  # reconnect. Probe connectivity every NET_CHECK_SECS (not every 10s loop, the doorbell needs the
+  # tight loop but a curl every 30s is plenty). On a down->up transition after an outage long enough
+  # that RC is surely dead, respawn by killing the session, the `while` fails, the guard exits, and
+  # launchd re-runs it, relaunching through the launch-gate (which waits for real connectivity) and
+  # re-registering RC. Short blips stay under the threshold (RC self-heals) and never trigger. The
+  # threshold also debounces a single flaky probe: one bad reading can't respawn, it needs sustained
+  # down past OUTAGE_RESPAWN_SECS.
+  if [ "$(( now - last_probe ))" -ge "$NET_CHECK_SECS" ]; then
+    last_probe=$now
+    if net_up; then
+      if [ "$net_state" = down ]; then
+        net_state=up
+        if [ "$(( now - down_since ))" -ge "$OUTAGE_RESPAWN_SECS" ]; then
+          tmux kill-session -t "$NAME" 2>/dev/null || true
+          break
+        fi
+      fi
+    elif [ "$net_state" = up ]; then
+      net_state=down; down_since=$now
     fi
   fi
   sleep 10

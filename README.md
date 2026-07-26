@@ -118,6 +118,93 @@ start on the next respawn.
 | `CLAUDE_RC_RESUME` | `1` = resume the prior conversation by id instead of a fresh one |
 | `CLAUDE_RC_RESUME_WAKE` | prompt typed AFTER a resume (re-arm session-scoped rails) |
 | `CLAUDE_RC_SESSION_FILE` | override the id file path (default `~/.claude/rc-session-<name>`) |
+| `CLAUDE_RC_CONNECT_URL` | URL the guard fetches to test real internet (default `https://1.1.1.1/`; an IP avoids a DNS dependency) |
+| `CLAUDE_RC_NET_CHECK_SECS` | how often to probe connectivity in the watch loop (default `30`) |
+| `CLAUDE_RC_OUTAGE_RESPAWN_SECS` | an outage longer than this, once internet recovers, triggers a respawn (default `600`; set `0` to respawn on any connectivity blip) |
+
+## network recovery
+
+Remote control registers when the process starts and rides a persistent connection. A **sustained**
+loss of real internet kills that connection and it does **not** reconnect on its own: the process stays
+alive but is reachable only from the local tmux, which defeats the whole point. You hit this after
+travel (offline in transit, online at the destination), a reboot where the network hadn't settled,
+**captive-portal wifi** (hotel / airport), or a **router that's up with a dead WAN**.
+
+There's no external signal for "is remote control up" (a live remote-control session can show zero
+persistent connections), so the guard keys off the actual cause: **real internet reachability**. It
+does a genuine connectivity probe (a TLS fetch of `CLAUDE_RC_CONNECT_URL`, an IP so there's no DNS
+dependency), not a route check, because a route check reports "wifi connected but no internet" as fine.
+The TLS fetch only succeeds with working internet: behind a captive portal the handshake fails or is
+redirected, and with no route it can't connect. This is the same mechanism the OS uses to light its
+"no internet" indicator. Four behaviors, all feeding one respawn (respawn re-registers remote control):
+
+- **launch-gate.** The guard won't start `claude --remote-control` into a dead network, launching remote
+  control without internet is guaranteed to fail. It **waits** for real connectivity (up to ~1 hour)
+  before launching, then a short settle. No delay when the internet is already up. Fixes the reboot and
+  wake-with-no-network cases.
+- **recovery respawn.** While running, it probes connectivity every `CLAUDE_RC_NET_CHECK_SECS`. A down→up
+  transition after an outage longer than `CLAUDE_RC_OUTAGE_RESPAWN_SECS` (default 10 min, matching
+  remote control's own timeout) respawns. Short blips stay under the threshold (remote control self-heals
+  on brief drops) and are ignored; the threshold also debounces a single flaky probe. Fixes travel and
+  captive-portal / dead-WAN wifi (once real internet returns).
+- **suspend/wake respawn.** The guard can't probe while the machine is asleep, so it also watches for a
+  time jump: a loop that took far longer than its interval means the machine was suspended that long.
+  Past the same threshold, it respawns. Fixes "closed the laptop for an hour, remote control is dead on
+  wake", the case a live probe can't see (it was frozen too).
+- **poll backstop.** If the launch-gate ever gives up (its ~1h cap) and launches into no-internet, the
+  recovery probe respawns it once internet returns.
+
+Set `CLAUDE_RC_OUTAGE_RESPAWN_SECS=0` to respawn on **any** connectivity blip (trades churn for
+immediacy). Known limit: this is polling, so recovery is within `CLAUDE_RC_NET_CHECK_SECS` of internet
+returning, not instant (macOS fires an event on network *config* changes but not on "internet came back
+on the same wifi", so a poll is required for the captive-portal case). A hang with no connectivity change
+at all (an internal client wedge, not network-caused) has no signal and isn't auto-caught, use the
+deliberate-restart procedure below.
+
+## recovery: when to deliberately restart
+
+Waterbear is crash-resilience, but the more common real-world need is a **deliberate restart** of a
+wedged-but-alive session. Some failures can't be fixed from inside the session because the thing that
+broke was acquired at process start and can't be re-acquired in-process:
+
+- **remote control dropped** (the network cases above; also just a long sleep).
+- **an MCP connector dropped** (a `... MCP server disconnected` notice mid-session; the account-level
+  connector is still fine, but this process's client is gone and nothing re-attaches it).
+- **the session is wedged** (frozen client, stuck at a login prompt after a network blip).
+- **the CLI is stale** (a respawn comes up on the newer installed version, so restart doubles as the
+  upgrade path).
+
+The fix in all of these is the same: kill the session and let the guard resume it. A respawn is ~15s
+and comes back mid-thread as the same session. Before you pull the pin:
+
+1. **Confirm the id file points at THIS session.** `~/.claude/rc-session-<name>` should hold the
+   current session id and the tmux pane's pid should be your own `claude` process. A wrong id resumes
+   a different conversation and loses yours.
+2. **Flush first.** A respawn is a fresh context load, not a guarantee: commit and push anything you
+   care about (a clean `git status` in every repo you touched), because resume replays the transcript
+   but a fresh-fallback does not.
+3. **Kill the tmux session, not just the pid:** `tmux kill-session -t <name>`. That's the exact
+   condition the guard's loop watches, so there's no window where the pane is dead but the guard is
+   still looping.
+4. Then launchd re-runs the guard, which resumes the pinned id and types the wake.
+
+Two safety properties make this safe to do on purpose: the resume id is **consumed before use** (a bad
+id falls through to a fresh start instead of crashlooping), and the crashloop backoff needs **4
+launches in 120s** before it trips, so a single deliberate kill never does.
+
+## the wake re-sends queued input
+
+On a respawn, the wake sequence **submits whatever message was queued in the input box** (a resume can
+restore a message you'd typed but not sent before the session died), then types the wake prompt. This
+is intentional: the queued text is something you already chose to send, so running it on the way back
+is usually what you want, and it keeps the wake from concatenating onto (and garbling) that text.
+
+Know the edge, though: it will **re-send** that queued message. If your workflow queues an input that
+you would NOT want auto-run on an unattended restart (a one-off destructive command, say), the respawn
+will run it. For most setups the wake is just "resume the conversation, re-enable remote control, and
+re-establish who you are", so this is a non-issue, but if a restart in your setup needs to be inert, be
+aware the queued line runs. To opt out, leave `CLAUDE_RC_RESUME_WAKE` empty and don't queue input you
+don't want replayed.
 
 ## the resume caveat
 
