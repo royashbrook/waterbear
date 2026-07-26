@@ -192,6 +192,20 @@ Two safety properties make this safe to do on purpose: the resume id is **consum
 id falls through to a fresh start instead of crashlooping), and the crashloop backoff needs **4
 launches in 120s** before it trips, so a single deliberate kill never does.
 
+## the wake re-sends queued input
+
+On a respawn, the wake sequence **submits whatever message was queued in the input box** (a resume can
+restore a message you'd typed but not sent before the session died), then types the wake prompt. This
+is intentional: the queued text is something you already chose to send, so running it on the way back
+is usually what you want, and it keeps the wake from concatenating onto (and garbling) that text.
+
+Know the edge, though: it will **re-send** that queued message. If your workflow queues an input that
+you would NOT want auto-run on an unattended restart (a one-off destructive command, say), the respawn
+will run it. For most setups the wake is just "resume the conversation, re-enable remote control, and
+re-establish who you are", so this is a non-issue, but if a restart in your setup needs to be inert, be
+aware the queued line runs. To opt out, leave `CLAUDE_RC_RESUME_WAKE` empty and don't queue input you
+don't want replayed.
+
 ## the resume caveat
 
 Resume replays the full transcript into context every time, so context grows with each respawn. Use

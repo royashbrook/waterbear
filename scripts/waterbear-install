@@ -188,6 +188,13 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
       sleep 1
     done
     sleep 2
+    # A resume can restore a message you had queued before the session died. SUBMIT it first (Enter),
+    # so your own pending input runs, THEN send the wake on a now-empty line, so the wake doesn't
+    # concatenate onto (and garble) your text. On an empty box the leading Enter is a harmless no-op.
+    # NOTE: this deliberately re-sends whatever was queued. That's the intended behavior here (it's
+    # something you already typed), see README "the wake re-sends queued input" for the caveat.
+    tmux send-keys -t "$NAME" Enter
+    sleep 2
     tmux send-keys -t "$NAME" -l "$NUDGE"
     sleep 1
     tmux send-keys -t "$NAME" Enter
