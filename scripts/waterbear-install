@@ -188,6 +188,13 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
       sleep 1
     done
     sleep 2
+    # A large session resumes behind a "Resume from summary / Resume full / Don't ask again" prompt
+    # that a blind keystroke can't navigate. If it's showing, pick the recommended SUMMARY option
+    # (option 1 is pre-highlighted, so Enter selects it) and let it load.
+    if tmux capture-pane -pt "$NAME" 2>/dev/null | grep -q "Resume from summary"; then
+      tmux send-keys -t "$NAME" Enter
+      sleep 3
+    fi
     # A resume can restore a message you had queued before the session died. SUBMIT it first (Enter),
     # so your own pending input runs, THEN send the wake on a now-empty line, so the wake doesn't
     # concatenate onto (and garble) your text. On an empty box the leading Enter is a harmless no-op.
