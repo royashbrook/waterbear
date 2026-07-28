@@ -184,7 +184,21 @@ scripts/waterbear-selfcmd --keys Down Enter   # drive the modal you just opened
 scripts/waterbear-selfcmd --where          # attach command, for when a human really IS needed
 ```
 
-Every form prints a file path holding the rendered screen. **You can only read it on your NEXT turn**:
+**Give the human the attach command before you drive.** Every driving form prints it first:
+
+```
+attach: tmux attach -t theo
+  (if this goes wrong, that command puts you in the terminal. Ctrl-b d detaches.)
+screen: /Users/you/.claude/waterbear-screen-theo.txt
+```
+
+Relay that `attach:` line in the same message where you say you are driving. This is the one thing you
+do that can lock a human out of their own terminal: a modal opens under them, or the driver wedges,
+and their reflex (talk to the session) no longer works, because the session is not reading the
+conversation any more. Handing over the escape hatch first, while the terminal is still in a known
+state, costs one line and is the difference between an inconvenience and being stuck.
+
+Every form also prints a `screen:` file path holding the rendered screen. **You can only read it on your NEXT turn**:
 keys you send to your own pane are buffered until this turn ends, and when the modal opens you are not
 running. The script forks a driver to bridge that gap. So the shape is: run it, tell the human what
 you just did, end your turn, then read the screen file and keep driving with `--keys`.

@@ -100,6 +100,19 @@ settle_and_capture() {
   printf '%s\n' "$cur" > "$SCREEN_FILE"
 }
 
+ATTACH_CMD="tmux attach -t $SESSION"
+
+# Printed BEFORE anything is driven, every time. Self-driving is the one thing an
+# agent does that can leave a human locked out of their own terminal: a modal opens
+# under them, or the driver wedges, and the reflex "just talk to it" no longer works
+# because the session is not reading the conversation. So the escape hatch goes out
+# first, unprompted, while the terminal is still in a known state. Relay it to the
+# human in the same message where you say you are driving.
+emit_attach() {
+  printf 'attach: %s\n' "$ATTACH_CMD"
+  printf '  (if this goes wrong, that command puts you in the terminal. Ctrl-b d detaches.)\n'
+}
+
 usage() {
   cat <<EOF
 usage:
@@ -109,6 +122,9 @@ usage:
   waterbear-selfcmd --where         print how a human attaches to this session
 
   --force   type even when the input box already has text in it
+
+Every driving form prints the attach command first. Pass it to your human before
+you drive, so they are never locked out of a terminal you are typing into.
 EOF
 }
 
@@ -129,20 +145,22 @@ done
 
 case "$MODE" in
   where)
-    printf 'tmux attach -t %s\n' "$SESSION"
+    # bare, so it stays pasteable and scriptable
+    printf '%s\n' "$ATTACH_CMD"
     exit 0
     ;;
   screen)
     settle_and_capture
-    printf '%s\n' "$SCREEN_FILE"
+    printf 'screen: %s\n' "$SCREEN_FILE"
     exit 0
     ;;
   keys)
     [ "${#ARGS[@]}" -gt 0 ] || die "--keys needs at least one key"
+    emit_attach
     ( tmux send-keys -t "$TARGET" "${ARGS[@]}"
       settle_and_capture ) >/dev/null 2>&1 &
     disown 2>/dev/null || true
-    printf '%s\n' "$SCREEN_FILE"
+    printf 'screen: %s\n' "$SCREEN_FILE"
     exit 0
     ;;
 esac
@@ -172,6 +190,8 @@ EOF
   fi
 fi
 
+emit_attach
+
 # Fork the driver so it outlives this turn. It types the text, gives the
 # autocomplete menu a beat to resolve (a slash command opens a picker, and the
 # first Enter only dismisses that), submits, then records the screen.
@@ -187,4 +207,4 @@ fi
 ) >/dev/null 2>&1 &
 disown 2>/dev/null || true
 
-printf '%s\n' "$SCREEN_FILE"
+printf 'screen: %s\n' "$SCREEN_FILE"

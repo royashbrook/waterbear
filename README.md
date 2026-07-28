@@ -223,7 +223,21 @@ scripts/waterbear-selfcmd --screen         # what is on my screen right now?
 scripts/waterbear-selfcmd --keys Down Enter   # drive the modal that just opened
 ```
 
-Each form prints the path of a file holding the rendered screen. **Read it on your NEXT turn, not
+Every driving form leads with the way back in, before it touches anything:
+
+```
+attach: tmux attach -t theo
+  (if this goes wrong, that command puts you in the terminal. Ctrl-b d detaches.)
+screen: /Users/you/.claude/waterbear-screen-theo.txt
+```
+
+That is deliberate. Self-driving is the one thing an agent does that can lock you out of your own
+terminal: a modal opens under you, or the driver wedges, and talking to the session no longer helps
+because it isn't reading the conversation. So the escape hatch goes out first, while the terminal is
+still in a known state, and the skill tells the agent to relay it to you in the same breath as "I'm
+driving."
+
+The `screen:` file holds the rendered screen. **Read it on your NEXT turn, not
 this one**: keystrokes sent to your own pane are buffered until the current turn ends, and once the
 modal opens the model is not running, so a single turn can never both drive and watch. The script
 forks a driver that outlives the turn to handle this. Tell the human you did it, so a modal opening
