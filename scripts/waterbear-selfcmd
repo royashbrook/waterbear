@@ -53,7 +53,22 @@ fi
 TARGET="$TMUX_PANE"
 SESSION="$(tmux display -p -t "$TARGET" '#{session_name}')"
 SCREEN_FILE="${WB_SCREEN_FILE:-$HOME/.claude/waterbear-screen-$SESSION.txt}"
+SEQ_FILE="$SCREEN_FILE.seq"
 mkdir -p "$(dirname "$SCREEN_FILE")"
+
+# Keys that ABORT rather than navigate. This TUI routes them to the interrupt path
+# before any open modal sees them, so a background sender cannot use them to close a
+# modal: it cancels whatever turn happens to be running instead, leaves the modal up,
+# and strands the human. Learned live, not theorized. Refused unconditionally, with no
+# --force, because there is no screen state that makes them safe: a modal covers the
+# footer that would otherwise show a turn in progress, so "is it generating right now"
+# is exactly the thing we cannot see at the moment we would need to know it.
+is_interrupt_key() {
+  case "$1" in
+    Escape|escape|ESCAPE|C-c|C-C|C-g|C-G|C-d|C-D) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
 capture() { tmux capture-pane -p -t "$TARGET"; }
 
@@ -65,10 +80,23 @@ capture() { tmux capture-pane -p -t "$TARGET"; }
 # NOTE: an empty box renders as the marker followed by a NON-BREAKING space (U+00A0),
 # not an ASCII one, so [[:space:]] misses it and every box reads as occupied. Normalize
 # nbsp to a plain space before looking at anything.
+# A modal, detected POSITIVELY by its own footer rather than inferred from the absence
+# of an input line. Needed because the marker glyph is overloaded: the composer prompt
+# and a modal's selected row both render as "❯", so parsing for the marker alone reads
+# a highlighted menu row as the input box, reports "text is queued", and a --force then
+# types into the modal. Found by testing, and it is the same overloading lesson as the
+# Escape key, one rung down.
+modal_open() {
+  capture | grep -qiE 'Enter to confirm|Esc to cancel|Press Enter to continue|↑/↓ to select'
+}
+
 input_state() {
+  if modal_open; then return 2; fi
   local nbsp; nbsp="$(printf '\302\240')"
   capture | awk -v nb="$nbsp" '
     { gsub(nb, " ") }
+    # skip list rows ("❯ 1. Bash"), which share the composer marker
+    /^[[:space:]]*(>|❯)[[:space:]]+[0-9]+\./ { next }
     /^[[:space:]]*(>|❯)([[:space:]]|$)/ { line = $0; found = 1 }
     END {
       if (!found) { exit 2 }
@@ -81,8 +109,15 @@ input_state() {
 }
 input_dirty() { local rc=0; input_state || rc=$?; [ "$rc" -eq 0 ]; }
 
+# Written atomically, and stamped. The agent reads this file on a LATER turn with no
+# way to know whether the driver had finished, so a plain `>` redirect can hand back
+# half a screen that looks exactly like a real one. Write to a temp file and rename,
+# and lead with a header naming what was sent and a sequence number, so the reader can
+# tell a fresh capture from a stale or partial one.
 settle_and_capture() {
-  local last="" cur="" same=0 waited=0
+  local what="$1" last="" cur="" same=0 waited=0 seq
+  seq=$(( $(cat "$SEQ_FILE" 2>/dev/null || echo 0) + 1 ))
+  printf '%s\n' "$seq" > "$SEQ_FILE"
   while :; do
     cur="$(capture)"
     if [ "$cur" = "$last" ]; then
@@ -97,7 +132,12 @@ settle_and_capture() {
     if [ "$waited" -gt $(( SETTLE_TIMEOUT * 10 / 4 )) ]; then break; fi
     sleep "$POLL"
   done
-  printf '%s\n' "$cur" > "$SCREEN_FILE"
+  {
+    printf '# waterbear-selfcmd capture #%s  sent: %s\n' "$seq" "$what"
+    printf '# %s\n\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+    printf '%s\n' "$cur"
+  } > "$SCREEN_FILE.tmp"
+  mv -f "$SCREEN_FILE.tmp" "$SCREEN_FILE"
 }
 
 ATTACH_CMD="tmux attach -t $SESSION"
@@ -125,6 +165,15 @@ usage:
 
 Every driving form prints the attach command first. Pass it to your human before
 you drive, so they are never locked out of a terminal you are typing into.
+
+This drives MODAL COMMANDS. It is not for handing yourself work: typing a task into
+your own input is a loop with no human in it.
+
+Escape and C-c are refused. They abort rather than navigate, so from here they cancel
+a running turn and leave the modal up. Finish a modal by navigating it; abandoning one
+is a human action.
+
+exits: 3 not in tmux  4 input box occupied  5 modal open, use --keys  6 abort key refused
 EOF
 }
 
@@ -150,15 +199,32 @@ case "$MODE" in
     exit 0
     ;;
   screen)
-    settle_and_capture
+    settle_and_capture '(screen only, nothing sent)'
     printf 'screen: %s\n' "$SCREEN_FILE"
     exit 0
     ;;
   keys)
     [ "${#ARGS[@]}" -gt 0 ] || die "--keys needs at least one key"
+    for k in "${ARGS[@]}"; do
+      if is_interrupt_key "$k"; then
+        cat >&2 <<EOF
+refusing to send "$k": it aborts, it does not navigate. this TUI hands it to the
+interrupt path before any open modal sees it, so from a background driver it cancels
+whatever turn is running, leaves the modal open, and locks the human out. there is no
+safe window to check for either, because an open modal hides the very indicator that
+would tell us a turn is in flight.
+
+to FINISH a modal, navigate it (Down, Up, Enter, Tab, digits) until it closes on its
+own. that is fully self-drivable.
+to ABANDON one, a human presses it:
+  $ATTACH_CMD
+EOF
+        exit 6
+      fi
+    done
     emit_attach
     ( tmux send-keys -t "$TARGET" "${ARGS[@]}"
-      settle_and_capture ) >/dev/null 2>&1 &
+      settle_and_capture "keys: ${ARGS[*]}" ) >/dev/null 2>&1 &
     disown 2>/dev/null || true
     printf 'screen: %s\n' "$SCREEN_FILE"
     exit 0
@@ -168,26 +234,35 @@ esac
 [ "${#ARGS[@]}" -gt 0 ] || { usage >&2; exit 1; }
 TEXT="${ARGS[*]}"
 
-if [ "$FORCE" -ne 1 ]; then
-  STATE=0; input_state || STATE=$?
-  if [ "$STATE" -eq 0 ]; then
-    cat >&2 <<EOF
+STATE=0; input_state || STATE=$?
+
+# State 2 refuses even with --force, on purpose. No input line on screen means we are
+# almost certainly looking at an open modal, and free text typed at a modal is not text
+# at all: every character becomes a keystroke in someone else's widget, selecting and
+# confirming things nobody chose. --force is a reasonable override for "I looked, the
+# box has my own queued text in it"; it is not an override for "I have no idea what is
+# reading these bytes." Drive a modal with --keys, which sends named keys deliberately.
+if [ "$STATE" -eq 2 ]; then
+  cat >&2 <<EOF
+refusing to type: no input line on screen, so a modal is almost certainly open and
+there is nothing here that would read "$TEXT" as text. every character would land as
+a keystroke in that modal, picking and confirming whatever it happens to be showing.
+--force does not apply here, and that is deliberate.
+
+look:    waterbear-selfcmd --screen
+drive:   waterbear-selfcmd --keys Down Enter
+EOF
+  exit 5
+fi
+
+if [ "$FORCE" -ne 1 ] && [ "$STATE" -eq 0 ]; then
+  cat >&2 <<EOF
 refusing to type: your input box is not empty, so submitting would send whatever
 is already queued there along with "$TEXT".
 look first:  waterbear-selfcmd --screen
 then either clear it deliberately or re-run with --force.
 EOF
-    exit 4
-  elif [ "$STATE" -eq 2 ]; then
-    cat >&2 <<EOF
-refusing to type: could not find the input line on screen, so there is no way to
-tell whether something is already queued there. that usually means a modal is
-already open, or the pane is rendering something unexpected.
-look first:  waterbear-selfcmd --screen
-then drive it with --keys, or re-run with --force if you know it is safe.
-EOF
-    exit 5
-  fi
+  exit 4
 fi
 
 emit_attach
@@ -203,7 +278,7 @@ emit_attach
   # a slash command with a picker eats the first Enter; if the text is still
   # sitting in the box, submit once more.
   if input_dirty; then tmux send-keys -t "$TARGET" Enter; fi
-  settle_and_capture
+  settle_and_capture "text: $TEXT"
 ) >/dev/null 2>&1 &
 disown 2>/dev/null || true
 
