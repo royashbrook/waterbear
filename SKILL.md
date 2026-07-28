@@ -170,6 +170,33 @@ Every env var is documented in the installer's header.
   CLAUDE_RC_NAME=<NEWNAME> ... bash scripts/waterbear-install
   ```
 
+## When a command can't be driven over remote control
+
+If you are about to tell the human "run `/hooks` for me" (or `/config`, `/login`, `/mcp`, any command
+that opens a modal in the terminal), **don't just ask**. Remote control drives the conversation, not
+the terminal, so that request means they have to physically get to the machine. You are in tmux, so
+you can drive your own terminal:
+
+```sh
+scripts/waterbear-selfcmd '/hooks'         # type it into your own input and submit
+scripts/waterbear-selfcmd --screen         # capture your own screen
+scripts/waterbear-selfcmd --keys Down Enter   # drive the modal you just opened
+scripts/waterbear-selfcmd --where          # attach command, for when a human really IS needed
+```
+
+Every form prints a file path holding the rendered screen. **You can only read it on your NEXT turn**:
+keys you send to your own pane are buffered until this turn ends, and when the modal opens you are not
+running. The script forks a driver to bridge that gap. So the shape is: run it, tell the human what
+you just did, end your turn, then read the screen file and keep driving with `--keys`.
+
+Two rules. **Say what you did** before ending the turn, so a modal appearing on the human's screen is
+not a mystery. And if it refuses (exit 4, input box not empty) look with `--screen` before reaching
+for `--force`: submitting on top of queued text sends that text too, which is how an agent fires
+something nobody meant to send.
+
+Not in tmux (desktop, cloud, a body started some other way)? It exits 3. Then, and only then, ask the
+human, and hand them `tmux attach -t <name>` rather than making them remember it.
+
 ## The resume caveat (important)
 
 Resume replays the FULL transcript into context every time, so context grows with each respawn.
