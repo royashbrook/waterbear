@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# waterbear-selfcmd -- let a session run a command in ITS OWN terminal, and read
+# its own screen afterwards.
+#
+# THE PROBLEM. Remote control drives the conversation, not the terminal. Commands
+# that open a modal TUI (/hooks, /config, /login, /mcp, /agents, ...) render in the
+# terminal and wait for keystrokes, so over remote control they are dead: the human
+# has to walk to the machine, remember the tmux incantation, attach, and drive the
+# modal by hand. Under waterbear that machine round-trip is the whole friction the
+# project exists to remove.
+#
+# THE FIX. A waterbear body lives in tmux, and tmux can both type into a pane and
+# render that pane back as text. So the session can drive itself:
+#
+#   waterbear-selfcmd '/hooks'      # type it into my own input and submit
+#   waterbear-selfcmd --screen      # what is on my screen right now?
+#   waterbear-selfcmd --keys Down Enter    # drive the modal that just opened
+#
+# WHY IT NEEDS TO DETACH. Keystrokes sent to your own pane are buffered until your
+# turn ends. Once the modal opens, the model is not running, so the same turn can
+# never both drive and watch. This script therefore forks a driver that OUTLIVES the
+# turn: it types, waits for the screen to settle, and writes the rendered screen to
+# a file. The agent reads that file on its NEXT turn (tell the human you did this, so
+# the modal opening under them is not a surprise).
+#
+# THE HAZARD IT GUARDS. Blind Enter. If input is already sitting in the box (a queued
+# message, a half-typed line), submitting appends to it and sends something nobody
+# meant to send. This refuses to type when the input line is dirty; pass --force if
+# you have looked at --screen and know what is there.
+#
+# Not in tmux? It prints nothing to drive and exits 3, which is the signal to fall
+# back to asking the human, and it tells you exactly what to hand them.
+set -euo pipefail
+
+SETTLE_SAMPLES="${WB_SETTLE_SAMPLES:-3}"   # identical screens in a row = settled
+SETTLE_TIMEOUT="${WB_SETTLE_TIMEOUT:-25}"  # seconds before we capture anyway
+POLL="${WB_POLL:-0.4}"
+
+die() { printf '%s\n' "$*" >&2; exit 1; }
+
+command -v tmux >/dev/null 2>&1 || die "no tmux on PATH, nothing to drive"
+
+if [ -z "${TMUX:-}" ] || [ -z "${TMUX_PANE:-}" ]; then
+  cat >&2 <<'EOF'
+not inside tmux, so this session cannot drive its own terminal.
+that means a modal command (/hooks, /config, /login, ...) needs a human at a
+terminal. a waterbear-installed body always runs in tmux; if you are here, you
+are either a desktop/cloud session or the body was started some other way.
+EOF
+  exit 3
+fi
+
+TARGET="$TMUX_PANE"
+SESSION="$(tmux display -p -t "$TARGET" '#{session_name}')"
+SCREEN_FILE="${WB_SCREEN_FILE:-$HOME/.claude/waterbear-screen-$SESSION.txt}"
+mkdir -p "$(dirname "$SCREEN_FILE")"
+
+capture() { tmux capture-pane -p -t "$TARGET"; }
+
+# Is there text sitting in the input box? Rather than parse the UI (which changes
+# between releases) this finds the LAST prompt-marker line and asks whether anything
+# follows the marker. An empty box renders as a bare marker; an idle one renders the
+# greyed placeholder, which is not real input.
+#   0 = dirty (text is queued)   1 = clean   2 = could not find the input line
+# NOTE: an empty box renders as the marker followed by a NON-BREAKING space (U+00A0),
+# not an ASCII one, so [[:space:]] misses it and every box reads as occupied. Normalize
+# nbsp to a plain space before looking at anything.
+input_state() {
+  local nbsp; nbsp="$(printf '\302\240')"
+  capture | awk -v nb="$nbsp" '
+    { gsub(nb, " ") }
+    /^[[:space:]]*(>|❯)([[:space:]]|$)/ { line = $0; found = 1 }
+    END {
+      if (!found) { exit 2 }
+      sub(/^[[:space:]]*(>|❯)[[:space:]]*/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (line == "") { exit 1 }
+      if (line ~ /^Try "/) { exit 1 }
+      exit 0
+    }'
+}
+input_dirty() { local rc=0; input_state || rc=$?; [ "$rc" -eq 0 ]; }
+
+settle_and_capture() {
+  local last="" cur="" same=0 waited=0
+  while :; do
+    cur="$(capture)"
+    if [ "$cur" = "$last" ]; then
+      same=$((same + 1))
+      [ "$same" -ge "$SETTLE_SAMPLES" ] && break
+    else
+      same=0
+    fi
+    last="$cur"
+    # bash has no float compare, so count polls against the timeout in tenths
+    waited=$((waited + 1))
+    if [ "$waited" -gt $(( SETTLE_TIMEOUT * 10 / 4 )) ]; then break; fi
+    sleep "$POLL"
+  done
+  printf '%s\n' "$cur" > "$SCREEN_FILE"
+}
+
+ATTACH_CMD="tmux attach -t $SESSION"
+
+# Printed BEFORE anything is driven, every time. Self-driving is the one thing an
+# agent does that can leave a human locked out of their own terminal: a modal opens
+# under them, or the driver wedges, and the reflex "just talk to it" no longer works
+# because the session is not reading the conversation. So the escape hatch goes out
+# first, unprompted, while the terminal is still in a known state. Relay it to the
+# human in the same message where you say you are driving.
+emit_attach() {
+  printf 'attach: %s\n' "$ATTACH_CMD"
+  printf '  (if this goes wrong, that command puts you in the terminal. Ctrl-b d detaches.)\n'
+}
+
+usage() {
+  cat <<EOF
+usage:
+  waterbear-selfcmd '<text>'        type <text> into your own input and submit
+  waterbear-selfcmd --keys K [K..]  send raw keys (Down, Enter, Escape, C-u, ...)
+  waterbear-selfcmd --screen        capture the current screen only
+  waterbear-selfcmd --where         print how a human attaches to this session
+
+  --force   type even when the input box already has text in it
+
+Every driving form prints the attach command first. Pass it to your human before
+you drive, so they are never locked out of a terminal you are typing into.
+EOF
+}
+
+FORCE=0
+MODE=""
+ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --force)  FORCE=1; shift ;;
+    --screen) MODE=screen; shift ;;
+    --where)  MODE=where; shift ;;
+    --keys)   MODE=keys; shift; ARGS=("$@"); break ;;
+    -h|--help) usage; exit 0 ;;
+    --) shift; ARGS+=("$@"); break ;;
+    *)  ARGS+=("$1"); shift ;;
+  esac
+done
+
+case "$MODE" in
+  where)
+    # bare, so it stays pasteable and scriptable
+    printf '%s\n' "$ATTACH_CMD"
+    exit 0
+    ;;
+  screen)
+    settle_and_capture
+    printf 'screen: %s\n' "$SCREEN_FILE"
+    exit 0
+    ;;
+  keys)
+    [ "${#ARGS[@]}" -gt 0 ] || die "--keys needs at least one key"
+    emit_attach
+    ( tmux send-keys -t "$TARGET" "${ARGS[@]}"
+      settle_and_capture ) >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+    printf 'screen: %s\n' "$SCREEN_FILE"
+    exit 0
+    ;;
+esac
+
+[ "${#ARGS[@]}" -gt 0 ] || { usage >&2; exit 1; }
+TEXT="${ARGS[*]}"
+
+if [ "$FORCE" -ne 1 ]; then
+  STATE=0; input_state || STATE=$?
+  if [ "$STATE" -eq 0 ]; then
+    cat >&2 <<EOF
+refusing to type: your input box is not empty, so submitting would send whatever
+is already queued there along with "$TEXT".
+look first:  waterbear-selfcmd --screen
+then either clear it deliberately or re-run with --force.
+EOF
+    exit 4
+  elif [ "$STATE" -eq 2 ]; then
+    cat >&2 <<EOF
+refusing to type: could not find the input line on screen, so there is no way to
+tell whether something is already queued there. that usually means a modal is
+already open, or the pane is rendering something unexpected.
+look first:  waterbear-selfcmd --screen
+then drive it with --keys, or re-run with --force if you know it is safe.
+EOF
+    exit 5
+  fi
+fi
+
+emit_attach
+
+# Fork the driver so it outlives this turn. It types the text, gives the
+# autocomplete menu a beat to resolve (a slash command opens a picker, and the
+# first Enter only dismisses that), submits, then records the screen.
+(
+  tmux send-keys -t "$TARGET" -l "$TEXT"
+  sleep 1
+  tmux send-keys -t "$TARGET" Enter
+  sleep 1
+  # a slash command with a picker eats the first Enter; if the text is still
+  # sitting in the box, submit once more.
+  if input_dirty; then tmux send-keys -t "$TARGET" Enter; fi
+  settle_and_capture
+) >/dev/null 2>&1 &
+disown 2>/dev/null || true
+
+printf 'screen: %s\n' "$SCREEN_FILE"

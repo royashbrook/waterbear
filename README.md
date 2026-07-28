@@ -206,6 +206,47 @@ re-establish who you are", so this is a non-issue, but if a restart in your setu
 aware the queued line runs. To opt out, leave `CLAUDE_RC_RESUME_WAKE` empty and don't queue input you
 don't want replayed.
 
+## commands remote control can't drive
+
+Remote control drives the *conversation*, not the *terminal*. Commands that open a modal TUI
+(`/hooks`, `/config`, `/login`, `/mcp`, ...) render in the terminal and wait for keystrokes, so from a
+phone or a desktop client they are dead ends. The usual outcome is the agent saying "please run
+/hooks" and the human having to walk to the machine and remember the tmux incantation.
+
+A waterbear body lives in tmux, and tmux can both type into a pane and render that pane back as text.
+So the body can just do it itself:
+
+```sh
+scripts/waterbear-selfcmd --where          # the exact attach command, for when a human IS needed
+scripts/waterbear-selfcmd '/hooks'         # type it into my own input and submit
+scripts/waterbear-selfcmd --screen         # what is on my screen right now?
+scripts/waterbear-selfcmd --keys Down Enter   # drive the modal that just opened
+```
+
+Every driving form leads with the way back in, before it touches anything:
+
+```
+attach: tmux attach -t theo
+  (if this goes wrong, that command puts you in the terminal. Ctrl-b d detaches.)
+screen: /Users/you/.claude/waterbear-screen-theo.txt
+```
+
+That is deliberate. Self-driving is the one thing an agent does that can lock you out of your own
+terminal: a modal opens under you, or the driver wedges, and talking to the session no longer helps
+because it isn't reading the conversation. So the escape hatch goes out first, while the terminal is
+still in a known state, and the skill tells the agent to relay it to you in the same breath as "I'm
+driving."
+
+The `screen:` file holds the rendered screen. **Read it on your NEXT turn, not
+this one**: keystrokes sent to your own pane are buffered until the current turn ends, and once the
+modal opens the model is not running, so a single turn can never both drive and watch. The script
+forks a driver that outlives the turn to handle this. Tell the human you did it, so a modal opening
+under them isn't a surprise.
+
+It refuses to type when the input box already has text in it, because submitting would send that text
+too (`--force` overrides once you've looked with `--screen`). Not in tmux, so nothing to drive? It
+exits 3 and says so, which is your cue to fall back to asking the human.
+
 ## the resume caveat
 
 Resume replays the full transcript into context every time, so context grows with each respawn. Use
