@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# waterbear-uninstall -- take a body down, without destroying the way back.
+#
+# Teardown is three different operations that people say with one word, and the
+# difference between them is whether a conversation survives:
+#
+#   STOP     the guard stops and the session ends. The LaunchAgent is still
+#            installed, so it comes back at next login. This is a pause.
+#   REMOVE   (the default here) stop, plus delete the LaunchAgent, plus kill the
+#            tmux session. The body is gone. The conversation is NOT: the
+#            transcript is on disk and the resume pointer is preserved, so
+#            reinstalling brings the same agent back mid-thought.
+#   FORGET   REMOVE, plus delete the resume pointer. This is the destructive one.
+#
+# THE FILE THAT MUST SURVIVE. `~/.claude/rc-session-<name>` reads like a name file
+# and is not one: it holds a SESSION ID. It is the only pointer from "the seat
+# called kai" to "the conversation kai has been having", and nothing regenerates
+# it, because the id is minted by a session that no longer exists. Deleting it
+# during cleanup looks like tidying and is data loss: the transcript stays on disk
+# but nothing knows which of hundreds of files it is. So a plain teardown keeps it,
+# and throwing it away takes an explicit --forget.
+#
+# That distinction is what makes a body disposable. Remove one and you have paused
+# an agent. Forget one and you have ended it.
+set -euo pipefail
+
+NAME="${1:-}"
+MODE=remove
+DRY=0
+FORCE_SELF=0
+
+for a in "$@"; do
+  case "$a" in
+    --forget)   MODE=forget ;;
+    --stop)     MODE=stop ;;
+    --dry-run)  DRY=1 ;;
+    --self)     FORCE_SELF=1 ;;
+  esac
+done
+
+if [ -z "$NAME" ] || [ "${NAME:0:2}" = "--" ]; then
+  cat >&2 <<'EOF'
+usage: waterbear-uninstall <name> [--stop|--forget] [--self] [--dry-run]
+
+  (default)   stop the guard, remove the LaunchAgent, kill the tmux session.
+              KEEPS ~/.claude/rc-session-<name>, so reinstalling resumes the
+              same conversation.
+  --stop      stop the guard only. It returns at next login.
+  --forget    also delete the resume pointer. The conversation becomes
+              unreachable: its transcript stays on disk with nothing naming it.
+  --self      allow tearing down the body you are running inside.
+  --dry-run   print what would happen, change nothing.
+EOF
+  exit 1
+fi
+
+USER_NAME="$(id -un)"
+LABEL="com.${USER_NAME}.claude-rc.${NAME}"
+PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+IDFILE="${CLAUDE_RC_SESSION_FILE:-$HOME/.claude/rc-session-${NAME}}"
+
+run() {
+  if [ "$DRY" -eq 1 ]; then printf 'would: %s\n' "$*"; else eval "$@"; fi
+}
+
+# Tearing down the body you are speaking from ends this process partway through,
+# which leaves the launchd side done and the tmux side undone: the worst possible
+# half-state, because the plist is gone so nothing brings it back. Refuse unless
+# it is deliberate, and say what to do instead.
+if [ -n "${TMUX:-}" ]; then
+  MY_SESSION="$(tmux display -p '#{session_name}' 2>/dev/null || echo '')"
+  if [ "$MY_SESSION" = "$NAME" ] && [ "$FORCE_SELF" -ne 1 ]; then
+    cat >&2 <<EOF
+refusing: "$NAME" is the session you are running inside, so this would kill you
+partway through and leave the LaunchAgent removed but the body still up, with
+nothing left to respawn it.
+
+if you meant it, pass --self and expect this shell to die mid-command.
+if you want the body gone but the agent intact, have someone else run it, or
+stop the guard only:
+  waterbear-uninstall $NAME --stop
+EOF
+    exit 2
+  fi
+fi
+
+echo "waterbear-uninstall: $NAME  (mode: $MODE${DRY:+, dry-run})"
+echo
+
+# launchd first. It is the thing that RESPAWNS, so killing tmux while it is still
+# loaded just hands you a fresh body a second later.
+if launchctl print "gui/$(id -u)/${LABEL}" >/dev/null 2>&1; then
+  run "launchctl bootout gui/$(id -u)/${LABEL}"
+  echo "  stopped the LaunchAgent"
+else
+  echo "  LaunchAgent was not loaded"
+fi
+
+if [ "$MODE" = "stop" ]; then
+  echo
+  echo "  stopped only. it comes back at next login, and the tmux session was left alone."
+  echo "  plist:  $PLIST"
+  exit 0
+fi
+
+if [ -f "$PLIST" ]; then
+  run "rm -f '$PLIST'"
+  echo "  removed $PLIST"
+else
+  echo "  no plist at $PLIST"
+fi
+
+if tmux has-session -t "$NAME" 2>/dev/null; then
+  run "tmux kill-session -t '$NAME'"
+  echo "  killed the tmux session"
+else
+  echo "  no tmux session named $NAME"
+fi
+
+echo
+if [ "$MODE" = "forget" ]; then
+  if [ -f "$IDFILE" ]; then
+    run "rm -f '$IDFILE'"
+    echo "  FORGOT the resume pointer ($IDFILE)."
+    echo "  that conversation's transcript is still on disk, but nothing names it any more."
+  else
+    echo "  no resume pointer to forget ($IDFILE)"
+  fi
+else
+  if [ -f "$IDFILE" ]; then
+    echo "  KEPT the resume pointer: $IDFILE"
+    echo "  that is the session id, not a name. reinstalling with CLAUDE_RC_RESUME=1"
+    echo "  brings this agent back mid-thought. --forget is what discards it."
+  else
+    echo "  no resume pointer existed, so a reinstall would start fresh."
+  fi
+fi

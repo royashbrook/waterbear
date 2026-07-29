@@ -243,3 +243,30 @@ on another OS can read `scripts/waterbear-install` and generate its own equivale
   exact session, or don't hand-edit at all: the capture hook self-heals the LIVE session's id on every
   start, so the safest path is to just keep using the body you want and let its hook keep the id file
   current.
+
+## Taking a body down
+
+Teardown is three operations that people say with one word, and the difference between them is
+whether a conversation survives. `scripts/waterbear-uninstall <name>` does the right one by default.
+
+| | what it does | the conversation |
+|---|---|---|
+| `--stop` | stops the guard. It returns at next login. | untouched |
+| (default) | stops the guard, removes the LaunchAgent, kills the tmux session | **preserved**, reinstall resumes it |
+| `--forget` | all of the above, plus deletes the resume pointer | **unreachable** |
+
+**The file that must survive a teardown is `~/.claude/rc-session-<name>`.** It reads like a name file
+and is not one: it holds a SESSION ID. It is the only pointer from "the seat called kai" to "the
+conversation kai has been having", and nothing regenerates it, because the id was minted by a session
+that no longer exists. Deleting it during cleanup looks like tidying and is data loss: the transcript
+is still on disk, but nothing knows which of hundreds of files it is.
+
+That distinction is what makes a body disposable rather than precious. Remove one and you have paused
+an agent. Forget one and you have ended it.
+
+Order matters, and the script gets it right: launchd first. It is the thing that RESPAWNS, so killing
+the tmux session while the LaunchAgent is still loaded just hands you a fresh body a second later.
+
+It refuses to tear down the session it is running inside unless you pass `--self`, because that dies
+partway through and leaves the worst half-state: LaunchAgent removed, body still up, nothing left to
+respawn it. `--dry-run` prints the plan.
