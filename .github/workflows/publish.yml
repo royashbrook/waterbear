@@ -1,0 +1,42 @@
+name: publish to npm
+
+# Publishes @royashbrook/waterbear when a version tag is pushed. The tag is
+# DERIVED from package.json, never the other way around: the release flow is
+# bump package.json (and SKILL.md to match), commit, tag v<version>, push the
+# tag. The guard below refuses a tag that disagrees with the files, so history
+# can never contain a published version whose source says something else.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm test
+      - name: tag must match package.json
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "tag v$TAG does not match package.json $PKG. bump the file, not the tag."
+            exit 1
+          fi
+      - name: publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN is not set. add the repo secret to enable publishing."
+            exit 1
+          fi
+          npm publish

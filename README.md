@@ -47,7 +47,15 @@ git clone https://github.com/royashbrook/waterbear ~/.claude/skills/waterbear
 
 ## install (humans)
 
-If you'd rather run it directly, the installer is one script. Straight from the raw file:
+Via npm, which also gets you updates (`npm outdated` / `npm update -g` work like anywhere else):
+
+```bash
+npx @royashbrook/waterbear install     # one-off, or:
+npm i -g @royashbrook/waterbear        # then: waterbear install / doctor / uninstall / selfcmd
+waterbear skill                        # copy the skill into ~/.claude/skills for your agent
+```
+
+Or skip npm entirely; the installer is one script. Straight from the raw file:
 
 ```bash
 CLAUDE_RC_NAME=myagent curl -fsSL \
@@ -261,6 +269,17 @@ Errors that render in the terminal never reach the remote-control transcript. A 
 with every project hook broken (relative hook paths that stopped resolving, say) and still report
 clean from your phone, for weeks. `waterbear-selfcmd --screen` is the cheapest way to look at what
 your session is actually staring at.
+
+## taking a body down
+
+`waterbear uninstall <name>` (or `scripts/waterbear-uninstall`). Teardown is three operations, and
+the difference between them is whether a conversation survives: `--stop` pauses (it returns at next
+login), the default removes the body but KEEPS `~/.claude/rc-session-<name>` so a reinstall resumes
+the same conversation mid-thought, and `--forget` also deletes that pointer, which is the
+destructive one. The pointer file holds a session id, not a name; nothing regenerates it, so
+deleting it during cleanup looks like tidying and is data loss. The script refuses to tear down the
+session it is running inside (`--self` overrides) and does launchd before tmux, because launchd is
+the thing that respawns.
 
 ## The nested-session hazard (and how to check)
 
