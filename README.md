@@ -247,6 +247,35 @@ It refuses to type when the input box already has text in it, because submitting
 too (`--force` overrides once you've looked with `--screen`). Not in tmux, so nothing to drive? It
 exits 3 and says so, which is your cue to fall back to asking the human.
 
+## The nested-session hazard (and how to check)
+
+`CLAUDE_RC_NAME` marks the durable body, and it is an environment variable, so **every child
+process inherits it**. That means any nested `claude` run started from inside a body (a `claude -p`
+one-liner in a tool call, a script that shells out, anything that spawns the CLI) starts its own
+session, fires the same SessionStart hook, sees the same name, and would write ITS id over the
+body's.
+
+That failure is silent and total. Every outward sign stays healthy: the body is alive, remote
+control answers, the file exists, and the id in it is a real session. It just belongs to a
+throwaway. You find out at the next respawn, when the agent comes back as a two-turn test and the
+real conversation is orphaned on disk with nothing naming it.
+
+The capture hook therefore establishes identity by POSITION, not by the inherited label: the body is
+the process tmux started in the pane, and a session whose nearest `claude` ancestor is anything else
+is running *inside* the body rather than *being* it, so it keeps its hands off the file. When it
+declines it records why in `~/.claude/rc-session-<name>.declined`.
+
+Because this is a failure that looks exactly like success, check it rather than trust it:
+
+```sh
+scripts/waterbear-doctor            # every body it can find
+scripts/waterbear-doctor kai theo   # named ones
+```
+
+It does not ask whether the file exists. It asks whether the id names a transcript on disk, and
+whether that transcript is the size and age of real work. A pointer at a 60 KB file last touched
+three days ago is a pointer at the wrong thing.
+
 ## the resume caveat
 
 Resume replays the full transcript into context every time, so context grows with each respawn. Use

@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# waterbear-doctor -- check that a body's resume pointer still points at something real.
+#
+# WHY THIS EXISTS. The way waterbear fails is by looking fine. `~/.claude/rc-session-<name>`
+# can hold a perfectly valid session id that belongs to the WRONG session, and every
+# outward sign stays healthy: the body is alive, remote control answers, the file
+# exists, the id parses. You find out at the next respawn, when the agent comes back
+# as a two-turn throwaway and the real conversation is orphaned on disk with nothing
+# naming it.
+#
+# So the check is not "does the file exist" but "does the id in it name a transcript,
+# and is that transcript the size and age of real work". A pointer at a 4 KB file that
+# was last touched three days ago is a pointer at the wrong thing.
+#
+# Run it after anything that spawns a nested `claude`, or on a schedule, or when a body
+# comes back not sounding like itself.
+set -euo pipefail
+
+PROJECTS="$HOME/.claude/projects"
+SMALL_KB="${WB_SMALL_KB:-64}"      # a transcript smaller than this is suspiciously fresh
+STALE_MIN="${WB_STALE_MIN:-1440}"  # untouched for longer than this is suspiciously cold
+
+names=("$@")
+if [ "${#names[@]}" -eq 0 ]; then
+  # every body we can see an id file for
+  for f in "$HOME"/.claude/rc-session-*; do
+    [ -f "$f" ] || continue
+    case "$f" in *.consumed|*.declined) continue ;; esac
+    names+=("$(basename "$f" | sed 's/^rc-session-//')")
+  done
+fi
+
+if [ "${#names[@]}" -eq 0 ]; then
+  echo "no waterbear bodies found (no ~/.claude/rc-session-* files)"
+  exit 0
+fi
+
+rc=0
+for name in "${names[@]}"; do
+  f="$HOME/.claude/rc-session-${name}"
+  if [ ! -f "$f" ]; then
+    printf '%-14s NO ID FILE. a respawn would start fresh.\n' "$name"
+    rc=1
+    continue
+  fi
+
+  sid="$(tr -d '[:space:]' < "$f")"
+  if [ -z "$sid" ]; then
+    printf '%-14s EMPTY id file. a respawn would start fresh.\n' "$name"
+    rc=1
+    continue
+  fi
+
+  t="$(find "$PROJECTS" -name "${sid}.jsonl" -type f 2>/dev/null | head -1)"
+  if [ -z "$t" ]; then
+    printf '%-14s DEAD POINTER: %s names no transcript on disk.\n' "$name" "${sid:0:8}…"
+    rc=1
+    continue
+  fi
+
+  kb=$(( $(wc -c < "$t") / 1024 ))
+  min=$(( ( $(date +%s) - $(stat -f %m "$t" 2>/dev/null || echo 0) ) / 60 ))
+
+  flag=""
+  [ "$kb" -lt "$SMALL_KB" ] && flag="  <-- SUSPICIOUS: tiny. a nested run may have clobbered this."
+  [ "$min" -gt "$STALE_MIN" ] && flag="${flag}  <-- SUSPICIOUS: cold. the live body may be writing somewhere else."
+
+  printf '%-14s %s…  %6s KB  touched %sm ago%s\n' "$name" "${sid:0:8}" "$kb" "$min" "$flag"
+  [ -n "$flag" ] && rc=1
+
+  d="$HOME/.claude/rc-session-${name}.declined"
+  if [ -f "$d" ]; then
+    printf '%-14s   note: capture hook declined a write, %s\n' "" "$(cat "$d")"
+  fi
+done
+
+exit "$rc"

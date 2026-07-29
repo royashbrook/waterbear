@@ -1,20 +1,93 @@
 #!/usr/bin/env bash
-# rc-session-capture-hook , SessionStart hook.
+# rc-session-capture-hook -- SessionStart hook.
 #
-# records THIS session's id so the persistent remote-control keepalive guard
-# (roy/scripts/persistent-claude-install) can RESUME this exact conversation on the next
-# (re)spawn instead of starting fresh , the on-disk transcript survives a crash, so resume
-# restores it whole. writes ~/.claude/rc-session-<name>, which the guard reads when
-# CLAUDE_RC_RESUME=1.
+# Records THIS session's id so the guard can RESUME this exact conversation on the
+# next respawn instead of starting fresh. Writes ~/.claude/rc-session-<name>, which
+# the guard reads when CLAUDE_RC_RESUME=1. It re-runs on resume too, so the file
+# self-heals to the live id on every start.
 #
-# GATED: only the persistent RC body writes it. that body carries CLAUDE_RC_NAME (set by its
-# launchd plist); a normal session at this repo has no CLAUDE_RC_NAME and exits untouched, so a
-# sibling opening a window here never clobbers theo's resume target. runs on resume too (hooks
-# re-run on resume), so the file self-heals to the live id every start.
+# THE GATE IS NOT JUST THE ENV VAR, AND THAT IS THE WHOLE POINT.
+#
+# `CLAUDE_RC_NAME` marks the durable body, but it is an environment variable, and
+# environment variables are INHERITED BY CHILDREN. So any nested `claude` run
+# started from inside the body (a `claude -p` one-liner in a tool call, a script
+# that shells out, a subagent that spawns the CLI) starts its own session, fires
+# this same hook, sees the same CLAUDE_RC_NAME, and writes ITS id over the body's.
+#
+# That failure is silent and total. Every outward sign stays healthy: the body is
+# alive, the file exists, the id in it is a real session. But it points at a
+# throwaway. The next respawn then resumes the throwaway and the real conversation
+# is orphaned on disk with nothing naming it. It happened for real: a two-turn
+# print-mode test clobbered a live seat's id, and only luck (no respawn in that
+# window) kept an entire arc.
+#
+# So identity is established by POSITION, not by an inherited label: the durable
+# body is the process tmux itself started in the pane. If our nearest `claude`
+# ancestor is that process, we are the body. If it is anything else, we are running
+# inside the body rather than being it, and we keep our hands off the file.
 set -euo pipefail
 
 name="${CLAUDE_RC_NAME:-}"
-[ -n "$name" ] || exit 0   # not the persistent RC body , do nothing
+[ -n "$name" ] || exit 0   # not a waterbear body, do nothing
+
+# Nearest `claude` process above us. The hook is a child of the session that fired
+# it, so this is that session's process.
+nearest_claude_pid() {
+  local pid="$PPID" depth=0 ppid comm
+  while [ -n "$pid" ] && [ "$pid" -gt 1 ] && [ "$depth" -lt 24 ]; do
+    comm="$(ps -o comm= -p "$pid" 2>/dev/null || true)"
+    case "$(basename "${comm:-}")" in
+      claude|claude-code) printf '%s\n' "$pid"; return 0 ;;
+    esac
+    ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+    [ -n "$ppid" ] || break
+    pid="$ppid"; depth=$((depth + 1))
+  done
+  return 1
+}
+
+# How many `claude` processes are above us. Used only when tmux cannot answer:
+# more than one means we are a session running inside another session.
+claude_ancestor_count() {
+  local pid="$PPID" depth=0 n=0 ppid comm
+  while [ -n "$pid" ] && [ "$pid" -gt 1 ] && [ "$depth" -lt 24 ]; do
+    comm="$(ps -o comm= -p "$pid" 2>/dev/null || true)"
+    case "$(basename "${comm:-}")" in
+      claude|claude-code) n=$((n + 1)) ;;
+    esac
+    ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+    [ -n "$ppid" ] || break
+    pid="$ppid"; depth=$((depth + 1))
+  done
+  printf '%s\n' "$n"
+}
+
+decline() {
+  # Silent to the user (hook stdout/stderr is not shown on exit 0), but not
+  # invisible: leave the reason somewhere a future debugger will find it, because
+  # the whole hazard here is a failure that looks exactly like success.
+  { mkdir -p "$HOME/.claude" 2>/dev/null || true
+    printf '%s declined: %s (pid %s)\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$1" "$$" \
+      > "$HOME/.claude/rc-session-${name}.declined" 2>/dev/null || true; } || true
+  exit 0
+}
+
+mine="$(nearest_claude_pid || true)"
+
+if [ -n "${TMUX_PANE:-}" ] && command -v tmux >/dev/null 2>&1; then
+  pane_pid="$(tmux display -p -t "$TMUX_PANE" '#{pane_pid}' 2>/dev/null || true)"
+  if [ -n "$pane_pid" ] && [ -n "$mine" ]; then
+    # The body is the process tmux started in the pane. Anything else that fires
+    # this hook is running inside the body, not being it.
+    [ "$mine" = "$pane_pid" ] || decline "nested session (claude $mine is not the pane process $pane_pid)"
+  else
+    [ "$(claude_ancestor_count)" -le 1 ] || decline "nested session (more than one claude ancestor, tmux could not confirm)"
+  fi
+else
+  # No tmux to ask. Depth is the only signal left, and it still catches the case
+  # that actually bites: a claude started from inside a claude.
+  [ "$(claude_ancestor_count)" -le 1 ] || decline "nested session (more than one claude ancestor, not in tmux)"
+fi
 
 sid="${CLAUDE_CODE_SESSION_ID:-}"
 if [ -z "$sid" ]; then
@@ -27,4 +100,5 @@ fi
 mkdir -p "$HOME/.claude"
 printf '%s\n' "$sid" > "$HOME/.claude/rc-session-${name}"
 rm -f "$HOME/.claude/rc-session-${name}.consumed" 2>/dev/null || true
+rm -f "$HOME/.claude/rc-session-${name}.declined" 2>/dev/null || true
 exit 0
