@@ -1,0 +1,48 @@
+{
+  "name": "@royashbrook/waterbear",
+  "version": "1.0.0",
+  "description": "Keep a CLI agent session alive through crashes, patches, quits, and reboots, and resume the same conversation when it comes back. macOS/launchd + tmux.",
+  "bin": {
+    "waterbear": "bin/waterbear.js"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "SKILL.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "bash -n scripts/waterbear-install && bash -n scripts/waterbear-uninstall && bash -n scripts/waterbear-doctor && bash -n scripts/waterbear-selfcmd && bash -n scripts/rc-session-capture-hook && node scripts/check-version-sync.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/royashbrook/waterbear.git"
+  },
+  "homepage": "https://github.com/royashbrook/waterbear#readme",
+  "bugs": {
+    "url": "https://github.com/royashbrook/waterbear/issues"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "agent",
+    "tmux",
+    "launchd",
+    "remote-control",
+    "session",
+    "persistence",
+    "keepalive"
+  ],
+  "author": "Roy Ashbrook",
+  "license": "MIT",
+  "os": [
+    "darwin"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
