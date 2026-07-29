@@ -88,6 +88,16 @@ Then run the installer at `~/.claude/skills/waterbear/scripts/waterbear-install`
 Only ask the human if they want to override a default (a different directory, custom wake prompts).
 Otherwise just set yourself up and confirm.
 
+## The first wake must be prompt-free
+
+A session blocked on a permission prompt is not running, cannot check its own screen, and never
+times out, and in the fresh post-resume window a prompt can fail to forward to remote control, so an
+unattended body can sit blocked forever while looking busy from every remote surface. Before ending
+your install turn: make sure the wake path (your scripts, your git shapes) is covered by allow rules
+the body's directory inherits, or tell the human the FIRST wake should be watched in tmux so they can
+answer "don't ask again" once. Steady-state prompts forward normally; it is only the wake window that
+needs this care.
+
 ## How it works (the pattern, 4 pieces)
 
 1. **remote-control**, one session reachable from phone/desktop/web at once. needs a real tty.

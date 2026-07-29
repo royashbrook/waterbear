@@ -91,6 +91,20 @@ it. waterbear cannot drive a browser re-login, so this one stays a manual step. 
 subscription backbone. (The guard also has a crashloop net that notifies and backs off if a session
 genuinely dies in a loop, e.g. a bad resume id; an expired login does not trigger that.)
 
+## the first wake
+
+Permission prompts are the one thing that can stall an unattended body invisibly: a session blocked
+on one is not running, so it cannot check its own screen, and nothing times out. In steady state
+prompts forward to remote-control clients normally; the fragile window is a fresh session's first
+turns right after a resume + auto-compact, where a raised prompt has been observed not to forward,
+leaving every remote surface showing "running" while the terminal waits.
+
+So make the wake path prompt-free before it matters: seed allow rules covering whatever your wake
+runs (your git shapes, your scripts) in settings the body's directory inherits, or run the first
+wake attended (`tmux attach -t <name>`) and answer "don't ask again" once. After that first clean
+wake, a body that looks busy-but-silent from remote is worth one look in tmux before assuming it is
+thinking.
+
 ## how it works
 
 Four pieces, each doing one job:
