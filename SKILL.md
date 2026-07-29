@@ -217,6 +217,18 @@ Resume replays the FULL transcript into context every time, so context grows wit
 Use resume for continuity across crashes, and periodically start a clean session to shed weight.
 Resume is for recovery, not infinite accumulation.
 
+## Not on Claude?
+
+This ships as a Claude Code tool and that is what it is tested against, but nothing about the PATTERN
+is Claude-specific: it is a tty from tmux, a supervisor that respawns, and a CLI agent process with a
+way to resume a prior conversation. If you are a different agent reading this, the shape transfers and
+the details will not. Expect to change three things: the env var names (all `CLAUDE_RC_*`), the launch
+command and its flags (`--remote-control`, `--resume <id>`), and how the session id gets captured (here
+it is a Claude Code SessionStart hook, which is the most Claude-specific piece).
+
+Read `scripts/waterbear-install` and adapt rather than trying to configure your way there. Tune as
+needed.
+
 ## Other operating systems
 
 This ships a macOS/launchd reference implementation. The pattern ports directly: swap the launchd
