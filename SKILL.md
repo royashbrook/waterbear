@@ -203,10 +203,31 @@ keys you send to your own pane are buffered until this turn ends, and when the m
 running. The script forks a driver to bridge that gap. So the shape is: run it, tell the human what
 you just did, end your turn, then read the screen file and keep driving with `--keys`.
 
-Two rules. **Say what you did** before ending the turn, so a modal appearing on the human's screen is
-not a mystery. And if it refuses (exit 4, input box not empty) look with `--screen` before reaching
-for `--force`: submitting on top of queued text sends that text too, which is how an agent fires
-something nobody meant to send.
+Rules, each of them paid for:
+
+**This is for modal commands, not for handing yourself work.** Nothing in the mechanism stops you
+typing a task into your own input and answering it next turn. That is a loop with no human in it.
+Drive your own terminal to reach a command you cannot otherwise reach, never to give yourself
+something to do.
+
+**Say what you did** before ending the turn, so a modal appearing on the human's screen is not a
+mystery, and pass them the `attach:` line.
+
+**Escape and C-c are refused (exit 6), and there is no override.** They abort rather than navigate:
+this TUI routes them to the interrupt path before any open modal sees them, so from a background
+driver they cancel whatever turn is running, leave the modal up, and strand the human at a terminal
+they have to walk to. That is not theoretical, it happened on the first real drive. Finish a modal by
+navigating it (Down/Up/Enter/Tab/digits) until it closes on its own, which is fully self-drivable.
+Abandoning one is a human action, so hand over the attach command instead.
+
+**Do not `--force` your way past a refusal you have not looked at.** Exit 4 (your input box has text
+in it) is a fine `--force` case once `--screen` shows you it is your own queued text. Exit 5 (a modal
+is open) refuses `--force` outright, because free text typed at a modal is not text: every character
+becomes a keystroke picking and confirming whatever that widget is showing. Use `--keys` there.
+
+**Read the `screen:` file only by its header.** Each capture is stamped with a sequence number and
+what was sent. There is one slot per session, so two drives in flight overwrite each other; if the
+header does not name what you just sent, you are looking at someone else's capture or a stale one.
 
 Not in tmux (desktop, cloud, a body started some other way)? It exits 3. Then, and only then, ask the
 human, and hand them `tmux attach -t <name>` rather than making them remember it.

@@ -244,8 +244,23 @@ forks a driver that outlives the turn to handle this. Tell the human you did it,
 under them isn't a surprise.
 
 It refuses to type when the input box already has text in it, because submitting would send that text
-too (`--force` overrides once you've looked with `--screen`). Not in tmux, so nothing to drive? It
-exits 3 and says so, which is your cue to fall back to asking the human.
+too (`--force` overrides once you've looked with `--screen`). It refuses outright, with no override,
+when a modal is already open, because free text typed at a modal is not text: every character becomes
+a keystroke picking and confirming whatever that widget is showing. Not in tmux, so nothing to drive?
+It exits 3 and says so, which is your cue to fall back to asking the human.
+
+**Escape and C-c are refused.** They abort rather than navigate. This TUI hands them to the interrupt
+path before any open modal sees them, so from a background driver they cancel whatever turn is
+running, leave the modal up, and strand you at a terminal you now have to walk to. Finishing a modal
+by navigating it works fine; abandoning one is a human action, which is the other reason every drive
+leads with the attach command.
+
+### it also shows you what remote control can't
+
+Errors that render in the terminal never reach the remote-control transcript. A body can be running
+with every project hook broken (relative hook paths that stopped resolving, say) and still report
+clean from your phone, for weeks. `waterbear-selfcmd --screen` is the cheapest way to look at what
+your session is actually staring at.
 
 ## The nested-session hazard (and how to check)
 
