@@ -1,26 +1,40 @@
-// The version lives in exactly one place: package.json. Everything else that
-// states a version must agree with it, and this check is what makes that a rule
-// instead of a hope.
+// The version is DERIVED, not stored: major.minor come from the latest git tag and
+// the patch is the commit count since it, so `v1.1` plus 4 commits publishes as
+// 1.1.4. Release CI computes that and stamps it into package.json and SKILL.md
+// before publishing, and nothing is committed back.
 //
-// Why it matters: the version is the update signal. SKILL.md's frontmatter is
-// what non-npm consumers (agents reading the skill from a clone or a skills dir)
-// see; package.json is what npm consumers see. If they drift, two audiences hold
-// two different beliefs about whether they are current, and both are sure they
-// are right. Publishing with a stale SKILL.md version is precisely the failure
-// nobody notices until it has already shipped.
+// So this check cannot compare two static strings any more. What it can still do is
+// guarantee the two things the stamp depends on:
+//
+//   1. both files carry a version line at all (SKILL.md is the copy every non-npm
+//      consumer reads, and a missing frontmatter line means the stamp silently has
+//      nothing to write into)
+//   2. they agree with each other, so the repo never states two different versions,
+//      and a stamped artifact is internally consistent
+//
+// Run locally it sees the tag-level base; run in CI after the stamp it sees the
+// computed value. Both are valid, and it is the same assertion either way.
 import { readFileSync } from 'node:fs';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const skill = readFileSync(new URL('../SKILL.md', import.meta.url), 'utf8');
 
+if (!pkg.version) {
+  console.error('package.json has no version field.');
+  process.exit(1);
+}
+
 const m = skill.match(/^version:\s*(\S+)\s*$/m);
 if (!m) {
-  console.error('SKILL.md frontmatter has no version: line. add one matching package.json.');
+  console.error('SKILL.md frontmatter has no version: line.');
+  console.error('release CI stamps the derived version into that line, so it must exist.');
   process.exit(1);
 }
+
 if (m[1] !== pkg.version) {
   console.error(`version mismatch: package.json says ${pkg.version}, SKILL.md says ${m[1]}.`);
-  console.error('package.json is the source of truth; update SKILL.md to match.');
+  console.error('these must agree. in the repo they hold the tag-level base; CI stamps both.');
   process.exit(1);
 }
+
 console.log(`version ok: ${pkg.version}`);
