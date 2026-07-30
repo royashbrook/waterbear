@@ -132,6 +132,21 @@ and recalled a fact from before the resume, while the transcript stayed one file
 a second file appearing.) So if a client ever shows you a shorter scrollback than you expected, that is
 a rendering question and not lost history, and the data on disk is whole.
 
+## Versioning and releases
+
+The version is **derived, not stored**: `major.minor` come from the latest git tag and the patch is the
+number of commits since it, so `v1.1` plus four commits publishes as `1.1.4`. Cutting a minor release
+is just `git tag v1.2 && git push --tags`, and every commit after it numbers itself.
+
+Every push to `main` publishes. Release CI computes the version, stamps it into `package.json` and
+`SKILL.md` in the build only, and publishes; nothing is committed back, because a commit from CI would
+itself move the number it just computed.
+
+The consequence worth knowing if you read the source: **a committed file cannot hold its own accurate
+version**, since the patch depends on the commit containing it. The repo carries the tag-level base
+(`1.1.0`), and the published artifact carries the computed one. If you want to know exactly what you
+have installed, ask npm or read the version in the package you installed, not the version in the repo.
+
 ## Changing the plist: kickstart does not reload it
 
 `launchctl kickstart -k` restarts the job from the spec launchd already has **in memory**. It does not
