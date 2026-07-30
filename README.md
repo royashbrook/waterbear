@@ -91,6 +91,47 @@ it. waterbear cannot drive a browser re-login, so this one stays a manual step. 
 subscription backbone. (The guard also has a crashloop net that notifies and backs off if a session
 genuinely dies in a loop, e.g. a bad resume id; an expired login does not trigger that.)
 
+## it carries THIS conversation, and it tells you so
+
+With `CLAUDE_RC_RESUME=1`, the installer pins the session you ran it from, so the durable body comes
+back as the conversation you were just having. It prints which conversation that will be, and if there
+is nothing to carry it says so in block capitals rather than leaving a blank field.
+
+That warning exists because the silent version of this is the worst thing the tool can do. Install
+succeeds, the body comes up FRESH, and you are left looking at two live sessions: your real
+conversation, and a brand-new empty agent beside it. Nothing errored, so nothing told you the promise
+had quietly inverted. Now it does.
+
+## waterbear yourself: the handoff is two steps, on purpose
+
+The common case is an agent running this on ITSELF, from inside the conversation you want to make
+durable. That creates one ordering problem worth understanding, because the alternative is alarming.
+
+If the body started immediately, your caller's client would still be alive and registered, so you
+would briefly have **two live sessions holding one conversation**: the window you are looking at, and
+a new one that renders only the turns after the resume point and therefore looks EMPTY. It reads like
+the tool forked your agent and ate your history. It did not, but nobody debugs from there.
+
+So when the installer can see it is running inside a session, it wires everything and **stops**:
+
+```
+1. finish up, then close or end the calling session
+2. waterbear start <name>      (or just log out and back in, launchd does it)
+3. tmux attach -t <name>       (also your phone / desktop app / claude.ai)
+```
+
+Step 1 is ordering, not etiquette: two clients on one conversation both append to the same transcript.
+
+This cannot be automated. The CLI does not hold its transcript open, so there is no handle to watch,
+and a desktop client is not attributable to a process worth polling, which means nothing can detect
+the caller letting go. `--now` skips the deferral if you would rather manage the overlap yourself.
+
+**Resume really is resume.** It reattaches to the same session: same id, same single transcript file,
+appended to, with the full context available. (Verified: a session was created, exited, resumed by id,
+and recalled a fact from before the resume, while the transcript stayed one file that grew rather than
+a second file appearing.) So if a client ever shows you a shorter scrollback than you expected, that is
+a rendering question and not lost history, and the data on disk is whole.
+
 ## the first wake
 
 Permission prompts are the one thing that can stall an unattended body invisibly: a session blocked

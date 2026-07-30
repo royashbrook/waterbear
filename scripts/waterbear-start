@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# waterbear-start -- start a body that was wired but deferred.
+#
+# The second half of the handoff. `waterbear-install`, when run from inside a live
+# session, wires everything and stops, because starting the body while its caller is
+# still alive leaves two live sessions holding one conversation, and the new one looks
+# empty. This is the step the human takes once they have closed the caller.
+#
+# It also does the one check the installer could not: if a session is somehow already
+# running under this name, say so rather than stacking another.
+set -euo pipefail
+
+NAME="${1:-}"
+if [ -z "$NAME" ]; then
+  echo "usage: waterbear-start <name>" >&2
+  exit 1
+fi
+
+USER_ID="$(id -u)"
+LABEL="com.$(id -un).claude-rc.${NAME}"
+PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+
+if [ ! -f "$PLIST" ]; then
+  cat >&2 <<EOF
+no waterbear body named "${NAME}" is wired on this machine.
+expected: $PLIST
+run the installer first (see the README), then come back here.
+EOF
+  exit 1
+fi
+
+if tmux has-session -t "$NAME" 2>/dev/null; then
+  echo "waterbear: \"${NAME}\" is already up. reattach with:  tmux attach -t ${NAME}"
+  exit 0
+fi
+
+# If the conversation this body will resume is still open somewhere, starting now is
+# how you get two clients on one transcript. We cannot detect that (the CLI holds no
+# handle on its transcript, and a desktop client is not attributable to a process), so
+# the honest move is to say what we cannot check rather than imply we checked it.
+idfile="${CLAUDE_RC_SESSION_FILE:-$HOME/.claude/rc-session-${NAME}}"
+if [ -f "$idfile" ]; then
+  echo "waterbear: resuming $(cut -c1-8 < "$idfile")…"
+  echo "  if that conversation is still open in another window, close it first: two"
+  echo "  clients on one transcript both append to it. this cannot be checked from here."
+  echo
+fi
+
+launchctl bootout "gui/${USER_ID}/${LABEL}" 2>/dev/null || true
+if ! launchctl bootstrap "gui/${USER_ID}" "$PLIST" 2>/dev/null; then
+  launchctl load -w "$PLIST"
+fi
+launchctl enable "gui/${USER_ID}/${LABEL}" 2>/dev/null || true
+
+echo "waterbear: started \"${NAME}\"."
+echo "  attach : tmux attach -t ${NAME}   (also on your phone / desktop app / claude.ai)"
+echo "  logs   : /tmp/${LABEL}.log   /tmp/${LABEL}.err"
+echo "  stop   : launchctl bootout gui/${USER_ID}/${LABEL}"

@@ -66,10 +66,12 @@ Then run the installer at `~/.claude/skills/waterbear/scripts/waterbear-install`
 
 1. Pick a short internal name (no spaces), usually your own (`kai`, `theo`). Optionally a pretty
    `CLAUDE_RC_TITLE` for the session list.
-2. Pin THIS conversation as the resume target:
-   ```bash
-   mkdir -p ~/.claude && printf '%s\n' "$CLAUDE_CODE_SESSION_ID" > ~/.claude/rc-session-<name>
-   ```
+2. Nothing to do: with `CLAUDE_RC_RESUME=1` the installer pins the session you run it from, so THIS
+   conversation is what comes back. It prints which conversation that is. **Read that line.** If it
+   says the body will start FRESH, stop and fix it before going further, because a fresh start means
+   the human ends up with a brand-new empty agent beside their real one, which is the single worst
+   outcome this tool can produce. (`--no-pin` exists for the rare case where you deliberately do not
+   want your own id carried; if you use it, say so out loud.)
 3. Make sure the capture hook is wired as a SessionStart hook (see "the capture hook" below) so that
    id self-heals on every future restart. If your project already wires it, skip this.
 4. Install the guard in resume-mode, defaulting to where you are:
@@ -87,6 +89,25 @@ Then run the installer at `~/.claude/skills/waterbear/scripts/waterbear-install`
 
 Only ask the human if they want to override a default (a different directory, custom wake prompts).
 Otherwise just set yourself up and confirm.
+
+## Waterbear yourself: you must hand off, and you must SAY SO
+
+When you run this on yourself, the installer wires the body and deliberately does NOT start it,
+because starting it while you are still alive leaves the human with two live sessions for one
+conversation, the newer of which looks empty. That is the single worst first impression this tool can
+make, and avoiding it costs one instruction.
+
+So your last act after installing is to TELL THE HUMAN, plainly, in your own words:
+
+1. nothing forked and nothing is lost, this session is still the live one
+2. they need to close or end this session
+3. then `waterbear start <name>`, or just log out and back in
+4. and that resume is a real resume, not a copy: same session id, same transcript, appended to, full
+   context. If their client happens to render a shorter scrollback than they expect, the history is
+   still there on disk. Worth saying up front, because a short scrollback is easy to misread as lost
+   memory.
+
+Do not leave any of this to convention. Convention is exactly what a first-time user does not have.
 
 ## The first wake must be prompt-free
 

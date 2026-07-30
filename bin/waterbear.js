@@ -17,6 +17,7 @@ const os = require('node:os');
 const ROOT = path.join(__dirname, '..');
 const CMDS = {
   install: 'waterbear-install',
+  start: 'waterbear-start',
   uninstall: 'waterbear-uninstall',
   doctor: 'waterbear-doctor',
   selfcmd: 'waterbear-selfcmd',
@@ -29,6 +30,7 @@ function usage() {
 
 usage:
   waterbear install     wire this machine (launchd + tmux + wake). env-driven, see docs.
+  waterbear start       start a body that was wired but deferred (after you close the caller).
   waterbear uninstall   take a body down. preserves the resume pointer unless --forget.
   waterbear doctor      check every body's resume pointer against what is actually on disk.
   waterbear selfcmd     let a session drive its own terminal (modal commands over remote control).
