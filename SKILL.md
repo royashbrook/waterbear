@@ -100,12 +100,12 @@ So your last act after installing is to TELL THE HUMAN, plainly, in your own wor
 1. nothing forked and nothing is lost, this session is still the live one
 2. they need to close or end this session
 3. then `waterbear start <name>`, or just log out and back in
-4. and their scrollback will look short afterwards because the app renders from the resume point
-   forward. The whole transcript is loaded and you will still have the context. Say this BEFORE they
-   see it, because seeing it first reads as lost memory.
+4. and that resume is a real resume, not a copy: same session id, same transcript, appended to, full
+   context. If their client happens to render a shorter scrollback than they expect, the history is
+   still there on disk. Worth saying up front, because a short scrollback is easy to misread as lost
+   memory.
 
-Do not skip step 4 and do not leave any of it to convention. Convention is exactly what a first-time
-user does not have.
+Do not leave any of this to convention. Convention is exactly what a first-time user does not have.
 
 ## The first wake must be prompt-free
 

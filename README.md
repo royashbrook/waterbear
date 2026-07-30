@@ -115,9 +115,11 @@ This cannot be automated. The CLI does not hold its transcript open, so there is
 and a desktop client is not attributable to a process worth polling, which means nothing can detect
 the caller letting go. `--now` skips the deferral if you would rather manage the overlap yourself.
 
-**One thing to expect on the way back:** the app renders your resumed conversation from the resume
-point forward, so the scrollback looks short. Your history is not gone. The full transcript is loaded
-and the model has all of it; only the rendered view is truncated.
+**Resume really is resume.** It reattaches to the same session: same id, same single transcript file,
+appended to, with the full context available. (Verified: a session was created, exited, resumed by id,
+and recalled a fact from before the resume, while the transcript stayed one file that grew rather than
+a second file appearing.) So if a client ever shows you a shorter scrollback than you expected, that is
+a rendering question and not lost history, and the data on disk is whole.
 
 ## the first wake
 
