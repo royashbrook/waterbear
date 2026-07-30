@@ -90,6 +90,18 @@ Then run the installer at `~/.claude/skills/waterbear/scripts/waterbear-install`
 Only ask the human if they want to override a default (a different directory, custom wake prompts).
 Otherwise just set yourself up and confirm.
 
+## Do not move the agent
+
+`CLAUDE_RC_DIR` is where the agent is **actually running right now**, and the default (your current
+directory) is almost always correct. Do not set it to where you feel the agent "belongs", or to a
+project home, or to a worktree you consider its base. Those are your ideas about the agent; the
+directory is a fact about it.
+
+The failure is silent and total: `claude --resume` only finds a session inside its own project
+directory, so a body pointed elsewhere starts a FRESH conversation, and the human is left with their
+real agent in one window and an empty impostor in another. The installer now refuses this, but the
+refusal is a net, not a plan. Just do not move the agent.
+
 ## Waterbear yourself: you must hand off, and you must SAY SO
 
 When you run this on yourself, the installer wires the body and deliberately does NOT start it,

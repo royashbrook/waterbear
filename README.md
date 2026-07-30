@@ -91,6 +91,23 @@ it. waterbear cannot drive a browser re-login, so this one stays a manual step. 
 subscription backbone. (The guard also has a crashloop net that notifies and backs off if a session
 genuinely dies in a loop, e.g. a bad resume id; an expired login does not trigger that.)
 
+## waterbear never moves your agent
+
+The promise is **identical, except now it cannot be killed**. The working directory is part of
+identical: an agent working in `~/code/foo` that comes back somewhere else is not the same agent,
+whatever its transcript says.
+
+This is mechanical, not philosophical. `claude --resume <id>` resolves a session **within the project
+directory it is launched from**. Point the body at a different directory and the id simply is not
+there, so the resume finds nothing and quietly starts a FRESH session instead. Nothing errors. You end
+up with your real conversation in one place and a brand-new empty agent in another, and the new one's
+capture hook overwrites the pointer to the real one within seconds.
+
+So the working directory defaults to **where you ran the installer**, and if you pin a conversation
+that does not live there, the install refuses and tells you where it actually lives. If you genuinely
+want a body elsewhere with a fresh start, that is a different thing and you say so: `--no-pin` with
+resume off.
+
 ## it carries THIS conversation, and it tells you so
 
 With `CLAUDE_RC_RESUME=1`, the installer pins the session you ran it from, so the durable body comes
