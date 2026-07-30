@@ -66,10 +66,12 @@ Then run the installer at `~/.claude/skills/waterbear/scripts/waterbear-install`
 
 1. Pick a short internal name (no spaces), usually your own (`kai`, `theo`). Optionally a pretty
    `CLAUDE_RC_TITLE` for the session list.
-2. Pin THIS conversation as the resume target:
-   ```bash
-   mkdir -p ~/.claude && printf '%s\n' "$CLAUDE_CODE_SESSION_ID" > ~/.claude/rc-session-<name>
-   ```
+2. Nothing to do: with `CLAUDE_RC_RESUME=1` the installer pins the session you run it from, so THIS
+   conversation is what comes back. It prints which conversation that is. **Read that line.** If it
+   says the body will start FRESH, stop and fix it before going further, because a fresh start means
+   the human ends up with a brand-new empty agent beside their real one, which is the single worst
+   outcome this tool can produce. (`--no-pin` exists for the rare case where you deliberately do not
+   want your own id carried; if you use it, say so out loud.)
 3. Make sure the capture hook is wired as a SessionStart hook (see "the capture hook" below) so that
    id self-heals on every future restart. If your project already wires it, skip this.
 4. Install the guard in resume-mode, defaulting to where you are:

@@ -62,6 +62,39 @@ LABEL="com.${SHORTUSER}.claude-rc.${NAME}"
 BIN_DIR="$HOME/.local/bin"
 GUARD="$BIN_DIR/claude-rc-keepalive"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+SESSION_FILE="${CLAUDE_RC_SESSION_FILE:-$HOME/.claude/rc-session-$NAME}"
+# --- PIN THE CALLER'S CONVERSATION (the whole promise of "waterbear yourself") ---
+#
+# The headline use case is an agent running this on ITSELF to persist the conversation
+# it is having. That only works if the body knows WHICH conversation, and the id lives
+# in one place: $SESSION_FILE. Until now this script only ever READ that file, and
+# writing it was a manual step in the docs, so the primary promise depended on an
+# optional instruction someone might skip, decline, or forget.
+#
+# That is exactly how it failed in practice. An agent judged its own recorded id
+# untrustworthy and chose not to pin it. Install succeeded, the body came up FRESH,
+# and the user was left looking at two live conversations: their real one, and a
+# brand-new empty agent beside it. Nothing errored. Nothing said "this will not carry
+# your conversation." The promise silently became its opposite.
+#
+# So: if we can see the caller's own session id and resume is wanted, PIN IT HERE, and
+# either way SAY which conversation the body will come back as. A fresh start is a
+# legitimate choice (`--no-pin`, or a first-ever install with nothing to carry), but it
+# must never be the silent default of a self-install.
+PIN_SID=""
+case " $* " in *" --no-pin "*) NO_PIN=1 ;; *) NO_PIN=0 ;; esac
+if [ "$RESUME" = "1" ] && [ "$NO_PIN" -eq 0 ] && [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+  PIN_SID="$CLAUDE_CODE_SESSION_ID"
+  mkdir -p "$(dirname "$SESSION_FILE")"
+  printf '%s\n' "$PIN_SID" > "$SESSION_FILE"
+  rm -f "$SESSION_FILE.consumed" 2>/dev/null || true
+fi
+# whatever the body will actually resume, resolved here so the summary cannot lie
+RESUME_TARGET=""
+if [ "$RESUME" = "1" ] && [ -s "$SESSION_FILE" ]; then
+  RESUME_TARGET="$(head -n1 "$SESSION_FILE" | tr -d '[:space:]')"
+fi
+
 
 # --- locate deps now: launchd runs with a bare PATH, so bake the real dirs into the plist ---
 CLAUDE_BIN="$(command -v claude || true)"
@@ -326,6 +359,25 @@ IN_SESSION=0
 case " $* " in *" --now "*) IN_SESSION=0 ;; esac
 case " $* " in *" --defer "*) IN_SESSION=1 ;; esac
 
+# A fresh start is a real choice, and it is also the outcome that silently breaks the
+# promise, so it gets said out loud on every path rather than inferred from a blank field.
+announce_target() {
+  if [ -n "$RESUME_TARGET" ]; then
+    echo "  this body WILL come back as your current conversation ($(printf '%s' "$RESUME_TARGET" | cut -c1-8)...)."
+    [ -n "$PIN_SID" ] && echo "  (pinned from the session you ran this in.)"
+  elif [ "$RESUME" = "1" ]; then
+    cat <<'WARN_EOF'
+  ***  HEADS UP: this body will start a FRESH conversation, not carry this one.  ***
+  no session id is recorded, so there is nothing to resume. if you meant to make THIS
+  conversation durable, that is not what will happen. run this from inside the session
+  you want carried (its id gets pinned automatically), or write the id yourself:
+      printf '%s\n' "$CLAUDE_CODE_SESSION_ID" > <the id file shown above>
+WARN_EOF
+  else
+    echo "  resume is off, so this body starts fresh every time (set CLAUDE_RC_RESUME=1 to carry a conversation)."
+  fi
+}
+
 if [ "$IN_SESSION" -eq 1 ]; then
   cat <<DEFER_EOF
 waterbear: wired, and DELIBERATELY NOT STARTED YET.
@@ -349,12 +401,14 @@ waterbear: wired, and DELIBERATELY NOT STARTED YET.
 
   session name : ${NAME}
   working dir  : ${WORKDIR}
-  resumes      : ${SID:-<fresh start, no conversation recorded yet>}
+  id file      : ${SESSION_FILE}
   logs         : /tmp/${LABEL}.log   /tmp/${LABEL}.err
   start now    : waterbear start ${NAME}
   stop later   : launchctl bootout gui/${USER_ID}/${LABEL}
   skip this    : re-run with --now (starts immediately, two sessions until you close one)
 DEFER_EOF
+  announce_target
+  echo
   exit 0
 fi
 
@@ -369,6 +423,9 @@ echo "  session name : ${NAME}"
 echo "  working dir  : ${WORKDIR}"
 echo "  attach       : tmux attach -t ${NAME}   (also on your phone / desktop app / claude.ai)"
 echo "  logs         : /tmp/${LABEL}.log   /tmp/${LABEL}.err"
+echo "  id file      : ${SESSION_FILE}"
 echo "  stop         : launchctl bootout gui/${USER_ID}/${LABEL}"
+echo
+announce_target
 echo
 echo "if a session was already running under that name, it was adopted (not restarted)."

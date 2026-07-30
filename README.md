@@ -91,6 +91,17 @@ it. waterbear cannot drive a browser re-login, so this one stays a manual step. 
 subscription backbone. (The guard also has a crashloop net that notifies and backs off if a session
 genuinely dies in a loop, e.g. a bad resume id; an expired login does not trigger that.)
 
+## it carries THIS conversation, and it tells you so
+
+With `CLAUDE_RC_RESUME=1`, the installer pins the session you ran it from, so the durable body comes
+back as the conversation you were just having. It prints which conversation that will be, and if there
+is nothing to carry it says so in block capitals rather than leaving a blank field.
+
+That warning exists because the silent version of this is the worst thing the tool can do. Install
+succeeds, the body comes up FRESH, and you are left looking at two live sessions: your real
+conversation, and a brand-new empty agent beside it. Nothing errored, so nothing told you the promise
+had quietly inverted. Now it does.
+
 ## waterbear yourself: the handoff is two steps, on purpose
 
 The common case is an agent running this on ITSELF, from inside the conversation you want to make
