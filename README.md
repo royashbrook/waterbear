@@ -164,6 +164,18 @@ version**, since the patch depends on the commit containing it. The repo carries
 (`1.1.0`), and the published artifact carries the computed one. If you want to know exactly what you
 have installed, ask npm or read the version in the package you installed, not the version in the repo.
 
+### A fresh start you fell back to is not a fresh start you asked for
+
+`CLAUDE_RC_WAKE` fires only when there was no conversation to resume. If you asked for resume and got
+this, something went wrong, and that is the worst possible moment to run an unconstrained
+identity-bootstrap prompt: a wake that says "self-locate, your home is X" will competently act on it in
+a session that was meant to be a continuation. That is how a body ends up correctly following
+instructions in the wrong place.
+
+So the guard now says it, in its log and in the session, and prepends a warning to the wake prompt
+itself telling the agent that a resume was intended and failed, that prior context does not exist, and
+not to relocate or reconfigure anything until the human confirms.
+
 ## Changing the plist: kickstart does not reload it
 
 `launchctl kickstart -k` restarts the job from the spec launchd already has **in memory**. It does not

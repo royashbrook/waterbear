@@ -286,8 +286,30 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
     tmux new-session -d -s "$NAME" -e "CLAUDE_RC_NAME=$NAME" -c "$WORKDIR" "claude --remote-control \"$TITLE\" --resume $SID"
     NUDGE="$RESUME_WAKE"
   else
+    # A fresh start that was ASKED FOR is normal. A fresh start we FELL BACK to is an
+    # incident, and until now the two were indistinguishable: the guard typed the
+    # identity-bootstrap wake prompt either way, as if nothing had gone wrong.
+    #
+    # That is the worst moment to run an unconstrained prompt. CLAUDE_RC_WAKE only
+    # ever fires when the intended thing did not happen, and a bootstrap that says
+    # "self-locate, your home is X" will competently act on that in a session that
+    # was supposed to be a resume. Seen for real: a body meant to resume an existing
+    # conversation came up fresh, read its wake prompt, and relocated itself.
+    #
+    # So say it, in the log and in the session. It costs one line and it turns a
+    # silent wrong-turn into something the human can see happening.
+    if [ "$RESUME" = "1" ]; then
+      echo "waterbear: WANTED TO RESUME AND COULD NOT. no recorded session id." >&2
+      echo "waterbear: this is a FRESH conversation, not the one you meant to continue." >&2
+      echo "waterbear: check ${SESSION_FILE} and ${SESSION_FILE}.consumed" >&2
+    fi
     tmux new-session -d -s "$NAME" -e "CLAUDE_RC_NAME=$NAME" -c "$WORKDIR" "claude --remote-control \"$TITLE\""
     NUDGE="$WAKE"
+    if [ "$RESUME" = "1" ]; then
+      # prepend the warning to whatever bootstrap was configured, so the agent knows
+      # its own situation before it acts on an identity prompt
+      NUDGE="NOTE: a resume was intended and failed, so this is a FRESH session, not a continuation. Do not assume prior context exists, and do not relocate or reconfigure anything until the human confirms. ${WAKE}"
+    fi
   fi
   # launchd has no hands. if a prompt is set, type it into the session once its UI has settled
   # (drawn the input box), so a respawn comes up as itself, not a blank assistant. a positional
