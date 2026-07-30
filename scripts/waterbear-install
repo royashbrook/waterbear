@@ -267,12 +267,54 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
     cur=${cur:-0}; db_off=${db_off:-0}
     if [ "$cur" -lt "$db_off" ]; then db_off=0; fi          # file truncated / rotated: reset
     if [ "$cur" -gt "$db_off" ]; then
-      ring=$(tail -c "+$((db_off + 1))" "$DOORBELL" 2>/dev/null | tr '\n' ' ' | cut -c1-400 || true)
-      db_off=$cur
-      if [ -n "$ring" ]; then
-        tmux send-keys -t "$NAME" -l "[doorbell] sibling ring, check the bus: $ring" 2>/dev/null || true
-        sleep 1; tmux send-keys -t "$NAME" Enter 2>/dev/null || true
-      fi
+      # DELIVERY CONTRACT (at-least-once, one send per ring line):
+      #   1. the offset advances ONLY after a send that reported success. the old order (advance,
+      #      then send with `|| true`) silently DROPPED a ring forever if send-keys failed for any
+      #      reason: pane gone, tmux hiccup, session mid-respawn. once the session's own watcher is
+      #      retired this loop is the sole delivery path, so a lost ring here is a lost message.
+      #   2. one send per LINE, never a flattened batch: two rings landing between polls used to be
+      #      joined and cut at 400 chars, so the second arrived garbled inside the first with no
+      #      marker that anything was truncated.
+      #   3. don't type into a box that already has text: appending to someone's queued input sends
+      #      THEIR text with OUR ring stapled on. the empty-box check is the same marker+nbsp parse
+      #      as waterbear-selfcmd (an empty composer renders "❯" + U+00A0). if the box is busy or
+      #      unreadable, leave the offset alone and let the next tick retry: a deferred ring is a
+      #      late ring, not a lost one.
+      #   4. only whole lines are consumed; a partial line at EOF waits for its newline.
+      while :; do
+        line=$(tail -c "+$((db_off + 1))" "$DOORBELL" 2>/dev/null | head -n 1 || true)
+        # a line is only complete if the unread region actually contains its newline
+        unread_len=$(( cur - db_off ))
+        line_len=${#line}
+        [ -n "$line" ] || break
+        [ $(( line_len + 1 )) -le "$unread_len" ] || break   # no newline yet: partial write, wait
+        # empty-box check: match the composer marker line, normalize the non-breaking space
+        pane_ok=0
+        pane_txt=$(tmux capture-pane -p -t "$NAME" 2>/dev/null || true)
+        if [ -n "$pane_txt" ]; then
+          nbsp="$(printf '\302\240')"
+          if printf '%s\n' "$pane_txt" | awk -v nb="$nbsp" '
+              { gsub(nb, " ") }
+              /^[[:space:]]*(>|❯)([[:space:]]|$)/ { l = $0; f = 1 }
+              END {
+                if (!f) exit 1
+                sub(/^[[:space:]]*(>|❯)[[:space:]]*/, "", l); sub(/[[:space:]]+$/, "", l)
+                if (l == "" || l ~ /^Try "/) exit 0
+                exit 1
+              }'; then pane_ok=1; fi
+        fi
+        [ "$pane_ok" -eq 1 ] || break                        # busy/unreadable: retry next tick
+        msg=$(printf '%s' "$line" | cut -c1-400)
+        [ ${#line} -gt 400 ] && msg="$msg (truncated, full line in the signal file)"
+        if tmux send-keys -t "$NAME" -l "[doorbell] $msg" 2>/dev/null; then
+          sleep 1
+          tmux send-keys -t "$NAME" Enter 2>/dev/null || true
+          db_off=$(( db_off + line_len + 1 ))               # consume ONLY after a successful send
+          sleep 1
+        else
+          break                                              # send failed: offset untouched, retry
+        fi
+      done
     fi
   fi
   # NETWORK-RECOVERY RESPAWN: a sustained loss of real internet kills remote control and it doesn't
