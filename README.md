@@ -91,6 +91,34 @@ it. waterbear cannot drive a browser re-login, so this one stays a manual step. 
 subscription backbone. (The guard also has a crashloop net that notifies and backs off if a session
 genuinely dies in a loop, e.g. a bad resume id; an expired login does not trigger that.)
 
+## waterbear yourself: the handoff is two steps, on purpose
+
+The common case is an agent running this on ITSELF, from inside the conversation you want to make
+durable. That creates one ordering problem worth understanding, because the alternative is alarming.
+
+If the body started immediately, your caller's client would still be alive and registered, so you
+would briefly have **two live sessions holding one conversation**: the window you are looking at, and
+a new one that renders only the turns after the resume point and therefore looks EMPTY. It reads like
+the tool forked your agent and ate your history. It did not, but nobody debugs from there.
+
+So when the installer can see it is running inside a session, it wires everything and **stops**:
+
+```
+1. finish up, then close or end the calling session
+2. waterbear start <name>      (or just log out and back in, launchd does it)
+3. tmux attach -t <name>       (also your phone / desktop app / claude.ai)
+```
+
+Step 1 is ordering, not etiquette: two clients on one conversation both append to the same transcript.
+
+This cannot be automated. The CLI does not hold its transcript open, so there is no handle to watch,
+and a desktop client is not attributable to a process worth polling, which means nothing can detect
+the caller letting go. `--now` skips the deferral if you would rather manage the overlap yourself.
+
+**One thing to expect on the way back:** the app renders your resumed conversation from the resume
+point forward, so the scrollback looks short. Your history is not gone. The full transcript is loaded
+and the model has all of it; only the rendered view is truncated.
+
 ## the first wake
 
 Permission prompts are the one thing that can stall an unattended body invisibly: a session blocked

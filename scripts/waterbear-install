@@ -299,7 +299,65 @@ cat > "$PLIST" <<PLIST_EOF
 </plist>
 PLIST_EOF
 
-# --- (re)bootstrap into launchd (idempotent) ---
+# --- start, or defer the start (the handoff problem) ---
+#
+# THE FAILURE THIS AVOIDS. "Waterbear yourself" is the common case: an agent runs
+# this from INSIDE the conversation it is making durable. If we start the body right
+# here, the caller's client is still alive and registered, so for a moment there are
+# TWO live sessions holding one conversation id: the window the user is looking at,
+# and a new one that renders only the turns after the resume point and therefore
+# looks EMPTY.
+#
+# Nobody debugs from there. It reads as "this tool forked my agent and ate my
+# history", and it is the last thing a first-time user sees. (Both are also
+# appending to one transcript, which is a real problem and not just a cosmetic one.)
+#
+# There is no way to detect the caller letting go: the CLI does not hold its
+# transcript open, so there is no file handle to watch, and a desktop client is not
+# attributable to a process we could poll. Automatic handoff is therefore off the
+# table, which leaves ORDERING, and ordering has to be stated rather than assumed.
+#
+# So: when we can see that we are being run from inside a session, wiring completes
+# but the body does NOT start. The human closes the caller, and the body comes up
+# either on the next login (launchd) or immediately via `waterbear start`. One
+# session, never two. `--now` overrides for anyone who knows what they are doing.
+IN_SESSION=0
+[ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && IN_SESSION=1
+case " $* " in *" --now "*) IN_SESSION=0 ;; esac
+case " $* " in *" --defer "*) IN_SESSION=1 ;; esac
+
+if [ "$IN_SESSION" -eq 1 ]; then
+  cat <<DEFER_EOF
+waterbear: wired, and DELIBERATELY NOT STARTED YET.
+
+  nothing has forked and nothing is lost. this window is still your only live
+  session, and its conversation is what the body will resume.
+
+  the body is not running yet on purpose: starting it now would leave you with TWO
+  live sessions for one conversation, and the new one would look empty (it renders
+  from the resume point forward, not your whole history). that is alarming and
+  avoidable, so it is your move to make instead:
+
+    1. finish up here, then CLOSE OR END THIS SESSION.
+    2. start the durable body, either way:
+         waterbear start ${NAME}          (immediately, from any terminal)
+         or just log out and back in      (launchd starts it for you)
+    3. reach it anywhere: tmux attach -t ${NAME}, or your phone / desktop / claude.ai
+
+  step 1 matters. two clients on one conversation both append to the same
+  transcript, so this is ordering, not etiquette.
+
+  session name : ${NAME}
+  working dir  : ${WORKDIR}
+  resumes      : ${SID:-<fresh start, no conversation recorded yet>}
+  logs         : /tmp/${LABEL}.log   /tmp/${LABEL}.err
+  start now    : waterbear start ${NAME}
+  stop later   : launchctl bootout gui/${USER_ID}/${LABEL}
+  skip this    : re-run with --now (starts immediately, two sessions until you close one)
+DEFER_EOF
+  exit 0
+fi
+
 launchctl bootout "gui/${USER_ID}/${LABEL}" 2>/dev/null || true
 if ! launchctl bootstrap "gui/${USER_ID}" "$PLIST" 2>/dev/null; then
   launchctl load -w "$PLIST"

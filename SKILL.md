@@ -88,6 +88,25 @@ Then run the installer at `~/.claude/skills/waterbear/scripts/waterbear-install`
 Only ask the human if they want to override a default (a different directory, custom wake prompts).
 Otherwise just set yourself up and confirm.
 
+## Waterbear yourself: you must hand off, and you must SAY SO
+
+When you run this on yourself, the installer wires the body and deliberately does NOT start it,
+because starting it while you are still alive leaves the human with two live sessions for one
+conversation, the newer of which looks empty. That is the single worst first impression this tool can
+make, and avoiding it costs one instruction.
+
+So your last act after installing is to TELL THE HUMAN, plainly, in your own words:
+
+1. nothing forked and nothing is lost, this session is still the live one
+2. they need to close or end this session
+3. then `waterbear start <name>`, or just log out and back in
+4. and their scrollback will look short afterwards because the app renders from the resume point
+   forward. The whole transcript is loaded and you will still have the context. Say this BEFORE they
+   see it, because seeing it first reads as lost memory.
+
+Do not skip step 4 and do not leave any of it to convention. Convention is exactly what a first-time
+user does not have.
+
 ## The first wake must be prompt-free
 
 A session blocked on a permission prompt is not running, cannot check its own screen, and never
