@@ -109,6 +109,24 @@ So your last act after installing is to TELL THE HUMAN, plainly, in your own wor
 
 Do not leave any of this to convention. Convention is exactly what a first-time user does not have.
 
+## Changing the plist: kickstart does not reload it
+
+`launchctl kickstart -k` restarts the job from the spec launchd already has **in memory**. It does not
+re-read the file. So after editing a plist (a changed env var, a new doorbell path, a different working
+directory) a kickstart restarts the OLD configuration and everything looks like it worked: the job
+bounces, the process comes back, and none of your changes are in it.
+
+A rewritten plist needs a full reload:
+
+```sh
+launchctl bootout   gui/$(id -u)/com.<user>.claude-rc.<name>
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.<user>.claude-rc.<name>.plist
+```
+
+Re-running the installer does this for you. It is only worth knowing because the shortcut is the
+obvious thing to reach for, it reports success, and the failure is invisible until you go looking for
+an env var that never arrived.
+
 ## The first wake must be prompt-free
 
 A session blocked on a permission prompt is not running, cannot check its own screen, and never
