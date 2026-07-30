@@ -95,14 +95,29 @@ SESSION_FILE="${CLAUDE_RC_SESSION_FILE:-$HOME/.claude/rc-session-$NAME}"
 # `--no-pin` declines to write at all.
 PIN_SID=""
 PIN_DECLINED=""
+PIN_REPLACED=""
 case " $* " in *" --no-pin "*) NO_PIN=1 ;; *) NO_PIN=0 ;; esac
 case " $* " in *" --pin "*) FORCE_PIN=1 ;; *) FORCE_PIN=0 ;; esac
 if [ "$RESUME" = "1" ] && [ "$NO_PIN" -eq 0 ] && [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
   EXISTING=""
   [ -s "$SESSION_FILE" ] && EXISTING="$(head -n1 "$SESSION_FILE" | tr -d '[:space:]')"
   if [ -n "$EXISTING" ] && [ "$EXISTING" != "$CLAUDE_CODE_SESSION_ID" ] && [ "$FORCE_PIN" -eq 0 ]; then
-    # somebody pointed this body at a specific conversation on purpose. keep it.
-    PIN_DECLINED="$EXISTING"
+    # THE LIVE SESSION IS CANON. A recorded id is a claim about the past and can be
+    # stale; the session you are standing in is a fact. Resuming a dead conversation
+    # because a leftover file said so is the failure this whole feature exists to
+    # prevent, so for a self-install the live session wins even against a recorded id.
+    #
+    # The cost is the other direction: installing FOR another seat means the recorded
+    # id is deliberate and ours is the wrong one. That path declares itself with
+    # --no-pin. To keep a forgotten flag from being lossy, the replaced id is written
+    # beside the file and announced loudly rather than silently dropped, so a
+    # cross-wire is recoverable in one command instead of gone.
+    PIN_REPLACED="$EXISTING"
+    printf '%s\n' "$EXISTING" > "$SESSION_FILE.replaced" 2>/dev/null || true
+    PIN_SID="$CLAUDE_CODE_SESSION_ID"
+    mkdir -p "$(dirname "$SESSION_FILE")"
+    printf '%s\n' "$PIN_SID" > "$SESSION_FILE"
+    rm -f "$SESSION_FILE.consumed" 2>/dev/null || true
   else
     PIN_SID="$CLAUDE_CODE_SESSION_ID"
     mkdir -p "$(dirname "$SESSION_FILE")"
@@ -387,6 +402,15 @@ announce_target() {
     if [ -n "$PIN_SID" ]; then
       echo "  this body WILL come back as your current conversation ($(printf '%s' "$RESUME_TARGET" | cut -c1-8)...)."
       echo "  (pinned from the session you ran this in.)"
+      if [ -n "$PIN_REPLACED" ]; then
+        echo
+        echo "  *** it previously pointed at $(printf '%s' "$PIN_REPLACED" | cut -c1-8)..., which has been REPLACED. ***"
+        echo "  the live session wins over a recorded one, because a recorded id can be stale and"
+        echo "  resuming a dead conversation is the failure this is meant to prevent."
+        echo "  installing this FOR ANOTHER SEAT? then that id was deliberate and yours is wrong."
+        echo "  put it back with:  cp '$SESSION_FILE.replaced' '$SESSION_FILE'"
+        echo "  and re-run with --no-pin, which is the flag for installing on someone else's behalf."
+      fi
     elif [ -n "$PIN_DECLINED" ]; then
       echo "  this body will resume $(printf '%s' "$RESUME_TARGET" | cut -c1-8)..., which is NOT the session you"
       echo "  are running in. keeping the id already recorded, because someone set it deliberately."
@@ -446,6 +470,40 @@ if ! launchctl bootstrap "gui/${USER_ID}" "$PLIST" 2>/dev/null; then
   launchctl load -w "$PLIST"
 fi
 launchctl enable "gui/${USER_ID}/${LABEL}" 2>/dev/null || true
+
+# VERIFY, rather than assume. Both bootstrap and load are swallowed above (they fail
+# noisily for reasons that do not matter, like an already-loaded label), so a real
+# failure looked exactly like success and the script cheerfully printed "started"
+# over a body that never came up. A body that never starts is the quietest failure
+# this tool has: nothing errors, the plist exists, the logs are empty, and you only
+# find out when you go looking for an agent that was never there.
+STARTED=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if tmux has-session -t "$NAME" 2>/dev/null; then STARTED=1; break; fi
+  sleep 1
+done
+
+if [ "$STARTED" -eq 0 ]; then
+  cat >&2 <<FAILED_EOF
+waterbear: WIRED, BUT THE BODY DID NOT COME UP.
+
+  the LaunchAgent is installed and enabled, but no tmux session named "${NAME}" exists
+  after waiting 10s. launchd accepted the job and nothing started, which it does not
+  report as an error.
+
+  try, in order:
+    launchctl bootstrap gui/${USER_ID} ${PLIST}
+    tmux ls
+    cat /tmp/${LABEL}.err
+
+  the wiring is fine, so it will also come up on its own at next login. this is not
+  data loss, it is a body that is not running yet.
+FAILED_EOF
+  echo "  session name : ${NAME}"
+  echo "  id file      : ${SESSION_FILE}"
+  announce_target
+  exit 1
+fi
 
 echo "waterbear: installed + started."
 echo "  session name : ${NAME}"
