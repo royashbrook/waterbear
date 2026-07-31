@@ -462,9 +462,18 @@ PLIST_EOF
 # but the body does NOT start. The human closes the caller, and the body comes up
 # either on the next login (launchd) or immediately via `waterbear start`. One
 # session, never two. `--now` overrides for anyone who knows what they are doing.
+# DEFAULT IS START NOW, including from inside the session being made durable. The
+# deferred handoff shipped as the default for two days and every single operator who
+# met it, without exception, read a correct result as an incomplete one: "done" followed
+# by numbered homework is a mixed signal no wording fixes. And the hazard it guarded
+# against turned out not to exist on the intended path: the CLI body resumes the SAME
+# conversation (same id, one transcript, verified repeatedly), the old client is a view
+# that catches up when remote control registers. Nothing forks. The alarming case we
+# were defending against was a different bug (a fresh start from a bad pin), fixed at
+# the pin and by the never-move guard, not by making every user do a two-step.
+#
+# --defer keeps the old behavior for anyone who wants the explicit handoff.
 IN_SESSION=0
-[ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && IN_SESSION=1
-case " $* " in *" --now "*) IN_SESSION=0 ;; esac
 case " $* " in *" --defer "*) IN_SESSION=1 ;; esac
 
 # A fresh start is a real choice, and it is also the outcome that silently breaks the

@@ -30,11 +30,11 @@ consequences worth stating up front:
 - **macOS only** (launchd). the pattern ports to linux/systemd (see "Other operating systems"), but
   this installer is mac. it is tied to that machine and user, the LaunchAgent is per-user and
   durable only while you are logged in, and the body does not follow you to another machine.
-- **Claude Desktop app**: you CAN invoke this from a desktop session, but the durable body is a
-  CLI/tmux process, and it will NOT resume that desktop conversation, resume-by-id is a CLI feature
-  the desktop app does not expose. installing births a SEPARATE CLI body; you then drive it from the
-  desktop / phone / web via remote-control. (identity still survives if your wake prompt
-  reconstitutes the agent from durable state; only the in-flight desktop chat is what you'd lose.)
+- **Claude Desktop app**: works. desktop and CLI write the same on-disk transcripts, so the CLI body
+  CAN resume a desktop conversation by id, provided it launches in the conversation's own working
+  directory (the never-move guard enforces this). the desktop window becomes one more remote-control
+  view of the now-durable session. (an earlier version of this doc claimed desktop conversations
+  could not be resumed; that was wrong, and it was disproven by doing it.)
 - **cloud / Claude Code on web**: not applicable, there is no local machine, launchd, or tmux to
   keep alive. waterbear is for a session running on your own computer.
 - **auth expiry needs an interactive re-login**: the CLI runs on your subscription login (OAuth),
@@ -89,6 +89,37 @@ Then run the installer at `~/.claude/skills/waterbear/scripts/waterbear-install`
 
 Only ask the human if they want to override a default (a different directory, custom wake prompts).
 Otherwise just set yourself up and confirm.
+
+## Do not move the agent
+
+`CLAUDE_RC_DIR` is where the agent is **actually running right now**, and the default (your current
+directory) is almost always correct. Do not set it to where you feel the agent "belongs", or to a
+project home, or to a worktree you consider its base. Those are your ideas about the agent; the
+directory is a fact about it.
+
+The failure is silent and total: `claude --resume` only finds a session inside its own project
+directory, so a body pointed elsewhere starts a FRESH conversation, and the human is left with their
+real agent in one window and an empty impostor in another. The installer now refuses this, but the
+refusal is a net, not a plan. Just do not move the agent.
+
+## Waterbear yourself: the takeover is automatic, say only what is true
+
+Installing from inside your own session starts the durable body immediately, and the body resumes
+THIS conversation: same session id, same single transcript, appended to. The window the human is
+looking at is a VIEW of that conversation, and it catches up when remote control registers. Nothing
+forks, there is no second body, and there is nothing the human must close first.
+
+So after installing, tell the human three true things, and no homework:
+
+1. done: this conversation is now durable, it survives crashes, patches, quits, and reboots
+2. the window may blink or briefly show a stale view while remote control re-registers; the
+   conversation underneath is one transcript on disk and it is whole
+3. they can reach it from anywhere: this window, their phone, the desktop app, or `tmux attach -t <name>`
+
+If the installer output says the body will start FRESH instead of resuming, STOP and fix that before
+saying anything else (see the pin section above). And `--defer` exists if a human explicitly wants to
+start the body themselves later; it is not the default because every operator who met the deferred
+handoff read a correct install as an incomplete one.
 
 ## Do not move the agent
 

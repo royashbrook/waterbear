@@ -119,29 +119,15 @@ succeeds, the body comes up FRESH, and you are left looking at two live sessions
 conversation, and a brand-new empty agent beside it. Nothing errored, so nothing told you the promise
 had quietly inverted. Now it does.
 
-## waterbear yourself: the handoff is two steps, on purpose
+## waterbear yourself: it just takes over
 
-The common case is an agent running this on ITSELF, from inside the conversation you want to make
-durable. That creates one ordering problem worth understanding, because the alternative is alarming.
+Running the installer from inside a session starts the durable body immediately, and the body resumes
+that exact conversation: same id, one transcript, appended to. The window you were talking in is a
+view, and it catches up when remote control registers. Nothing forks and there is nothing to close.
 
-If the body started immediately, your caller's client would still be alive and registered, so you
-would briefly have **two live sessions holding one conversation**: the window you are looking at, and
-a new one that renders only the turns after the resume point and therefore looks EMPTY. It reads like
-the tool forked your agent and ate your history. It did not, but nobody debugs from there.
-
-So when the installer can see it is running inside a session, it wires everything and **stops**:
-
-```
-1. finish up, then close or end the calling session
-2. waterbear start <name>      (or just log out and back in, launchd does it)
-3. tmux attach -t <name>       (also your phone / desktop app / claude.ai)
-```
-
-Step 1 is ordering, not etiquette: two clients on one conversation both append to the same transcript.
-
-This cannot be automated. The CLI does not hold its transcript open, so there is no handle to watch,
-and a desktop client is not attributable to a process worth polling, which means nothing can detect
-the caller letting go. `--now` skips the deferral if you would rather manage the overlap yourself.
+(`--defer` wires everything without starting, for anyone who wants to start the body themselves with
+`waterbear start <name>`. It exists because the ordering is observable; it is not the default because
+in practice everyone who met a deferred install read "done, now do these steps" as a failure.)
 
 **Resume really is resume.** It reattaches to the same session: same id, same single transcript file,
 appended to, with the full context available. (Verified: a session was created, exited, resumed by id,
