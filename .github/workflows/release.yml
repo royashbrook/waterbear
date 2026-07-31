@@ -17,7 +17,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Trusted publishing (OIDC): GitHub mints a short-lived identity token per run and npm
+# verifies it against the publisher configured on the package. No NPM_TOKEN, nothing
+# stored, nothing to rotate. `id-token: write` is what allows that token to be minted.
 permissions:
+  id-token: write
   contents: read
 
 concurrency:
@@ -37,6 +41,10 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+
+      # OIDC trusted publishing needs npm >= 11.5.1 and the runner ships older
+      - name: npm with trusted publishing support
+        run: npm install -g npm@latest
 
       - name: derive the version
         id: v
@@ -86,15 +94,10 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: publish
+      - name: publish (via OIDC)
         if: steps.pub.outputs.skip == 'false'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.v.outputs.version }}
         run: |
-          if [ -z "$NODE_AUTH_TOKEN" ]; then
-            echo "NPM_TOKEN is not set. add the repo secret to enable publishing."
-            exit 1
-          fi
-          npm publish
+          npm publish --access public
           echo "published @royashbrook/waterbear@$VERSION"

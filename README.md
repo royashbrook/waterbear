@@ -155,9 +155,11 @@ The version is **derived, not stored**: `major.minor` come from the latest git t
 number of commits since it, so `v1.1` plus four commits publishes as `1.1.4`. Cutting a minor release
 is just `git tag v1.2 && git push --tags`, and every commit after it numbers itself.
 
-Every push to `main` publishes. Release CI computes the version, stamps it into `package.json` and
-`SKILL.md` in the build only, and publishes; nothing is committed back, because a commit from CI would
-itself move the number it just computed.
+Every push to `main` publishes, via npm **trusted publishing** (OIDC): GitHub mints a short-lived
+identity token per run and npm verifies it against the publisher configured on the package. There is
+no `NPM_TOKEN` to store, leak, or rotate. Release CI computes the version, stamps it into
+`package.json` and `SKILL.md` in the build only, and publishes; nothing is committed back, because a
+commit from CI would itself move the number it just computed.
 
 The consequence worth knowing if you read the source: **a committed file cannot hold its own accurate
 version**, since the patch depends on the commit containing it. The repo carries the tag-level base
