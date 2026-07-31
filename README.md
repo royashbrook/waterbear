@@ -91,6 +91,23 @@ it. waterbear cannot drive a browser re-login, so this one stays a manual step. 
 subscription backbone. (The guard also has a crashloop net that notifies and backs off if a session
 genuinely dies in a loop, e.g. a bad resume id; an expired login does not trigger that.)
 
+## waterbear never moves your agent
+
+The promise is **identical, except now it cannot be killed**. The working directory is part of
+identical: an agent working in `~/code/foo` that comes back somewhere else is not the same agent,
+whatever its transcript says.
+
+This is mechanical, not philosophical. `claude --resume <id>` resolves a session **within the project
+directory it is launched from**. Point the body at a different directory and the id simply is not
+there, so the resume finds nothing and quietly starts a FRESH session instead. Nothing errors. You end
+up with your real conversation in one place and a brand-new empty agent in another, and the new one's
+capture hook overwrites the pointer to the real one within seconds.
+
+So the working directory defaults to **where you ran the installer**, and if you pin a conversation
+that does not live there, the install refuses and tells you where it actually lives. If you genuinely
+want a body elsewhere with a fresh start, that is a different thing and you say so: `--no-pin` with
+resume off.
+
 ## it carries THIS conversation, and it tells you so
 
 With `CLAUDE_RC_RESUME=1`, the installer pins the session you ran it from, so the durable body comes
@@ -138,14 +155,28 @@ The version is **derived, not stored**: `major.minor` come from the latest git t
 number of commits since it, so `v1.1` plus four commits publishes as `1.1.4`. Cutting a minor release
 is just `git tag v1.2 && git push --tags`, and every commit after it numbers itself.
 
-Every push to `main` publishes. Release CI computes the version, stamps it into `package.json` and
-`SKILL.md` in the build only, and publishes; nothing is committed back, because a commit from CI would
-itself move the number it just computed.
+Every push to `main` publishes, via npm **trusted publishing** (OIDC): GitHub mints a short-lived
+identity token per run and npm verifies it against the publisher configured on the package. There is
+no `NPM_TOKEN` to store, leak, or rotate. Release CI computes the version, stamps it into
+`package.json` and `SKILL.md` in the build only, and publishes; nothing is committed back, because a
+commit from CI would itself move the number it just computed.
 
 The consequence worth knowing if you read the source: **a committed file cannot hold its own accurate
 version**, since the patch depends on the commit containing it. The repo carries the tag-level base
 (`1.1.0`), and the published artifact carries the computed one. If you want to know exactly what you
 have installed, ask npm or read the version in the package you installed, not the version in the repo.
+
+### A fresh start you fell back to is not a fresh start you asked for
+
+`CLAUDE_RC_WAKE` fires only when there was no conversation to resume. If you asked for resume and got
+this, something went wrong, and that is the worst possible moment to run an unconstrained
+identity-bootstrap prompt: a wake that says "self-locate, your home is X" will competently act on it in
+a session that was meant to be a continuation. That is how a body ends up correctly following
+instructions in the wrong place.
+
+So the guard now says it, in its log and in the session, and prepends a warning to the wake prompt
+itself telling the agent that a resume was intended and failed, that prior context does not exist, and
+not to relocate or reconfigure anything until the human confirms.
 
 ## Changing the plist: kickstart does not reload it
 
