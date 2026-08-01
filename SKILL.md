@@ -114,7 +114,24 @@ So after installing, tell the human three true things, and no homework:
 1. done: this conversation is now durable, it survives crashes, patches, quits, and reboots
 2. the window may blink or briefly show a stale view while remote control re-registers; the
    conversation underneath is one transcript on disk and it is whole
-3. they can reach it from anywhere: this window, their phone, the desktop app, or `tmux attach -t <name>`
+3. they can reach it from anywhere: their phone, the desktop app, or `tmux attach -t <name>`
+
+**One exception to "no homework", and it is required, not a tip.** If this conversation was BORN in
+the desktop app (the installer detects this and says so), the desktop keeps its NATIVE chat for the
+conversation alongside the new remote-control entry. That native chat is not a stale view: it is a
+live second copy of this agent and will answer if typed into. Mobile dedupes the two surfaces;
+desktop shows both. Tell the human to **archive the native desktop chat** as soon as the body
+confirms. Archiving removes the surface, never the data, the transcript on disk is the conversation
+and the body carries all of it.
+
+## The singleton rule
+
+A waterbeared agent is ONE agent. The installer enforces the half it can see: if a conversation
+already has a body (any name), a second install against it is refused with directions to the
+existing body. The half it cannot see is surfaces: a fossil desktop chat, an old window someone
+types into. Never wake an agent through an old surface and waterbear it again, that is how one
+agent becomes two. If you are unsure whether a conversation already has a body, `waterbear doctor`
+lists every pinned conversation on the machine.
 
 If the installer output says the body will start FRESH instead of resuming, STOP and fix that before
 saying anything else (see the pin section above). And `--defer` exists if a human explicitly wants to

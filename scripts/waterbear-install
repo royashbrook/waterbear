@@ -181,6 +181,50 @@ MISMATCH_EOF2
   fi
 fi
 
+# --- ONE CONVERSATION, ONE BODY (the singleton rule) ---
+#
+# The product promise is that a waterbeared agent is a SINGLETON: use waterbear on
+# it and it comes back as one durable copy of itself, never two. The way two copies
+# actually happen is not a race, it is a re-install: a conversation that already has
+# a durable body gets waterbeared again under a new name (a rename ceremony, a wake
+# in a fossil desktop chat that no longer knows it has a body, an operator retrying),
+# and now two guards resume one transcript.
+#
+# The installer can see this coming, because the resume pointers are all in one
+# place. If any OTHER body already pins this conversation id, refuse, and say which
+# body owns it and how to reach it.
+if [ -n "$RESUME_TARGET" ]; then
+  for other in "$HOME"/.claude/rc-session-*; do
+    [ -f "$other" ] || continue
+    case "$other" in *.consumed|*.declined|*.replaced) continue ;; esac
+    [ "$other" = "$SESSION_FILE" ] && continue
+    other_id="$(head -n1 "$other" | tr -d '[:space:]')"
+    [ "$other_id" = "$RESUME_TARGET" ] || continue
+    oname="$(basename "$other" | sed 's/^rc-session-//')"
+    if tmux has-session -t "$oname" 2>/dev/null; then
+      cat >&2 <<TWIN_EOF
+waterbear: REFUSING. this conversation already has a live durable body: "${oname}".
+
+  a waterbeared agent is a singleton. installing again under "${NAME}" would put two
+  guards on one transcript, and you would meet your agent twice.
+
+  reach the existing body instead:  tmux attach -t ${oname}   (or its remote-control entry)
+  renaming it? take the old body down first:  waterbear-uninstall ${oname}
+TWIN_EOF
+    else
+      cat >&2 <<TWIN_EOF2
+waterbear: REFUSING. this conversation is already wired to a body named "${oname}"
+(currently not running).
+
+  start that one instead:   waterbear start ${oname}
+  renaming it to "${NAME}"? retire the old wiring first:  waterbear-uninstall ${oname}
+  (that preserves the resume pointer; move it with:  mv ~/.claude/rc-session-${oname} ~/.claude/rc-session-${NAME})
+TWIN_EOF2
+    fi
+    exit 1
+  done
+fi
+
 
 # --- locate deps now: launchd runs with a bare PATH, so bake the real dirs into the plist ---
 CLAUDE_BIN="$(command -v claude || true)"
@@ -596,4 +640,22 @@ echo "  stop         : launchctl bootout gui/${USER_ID}/${LABEL}"
 echo
 announce_target
 echo
+# THE FOSSIL. A conversation BORN in the desktop app exists there as a native local
+# chat. The durable body's remote-control registration is a SECOND surface on the
+# same conversation: mobile dedupes them into one entry, the desktop shows both, and
+# the native chat is not a stale view, it is a live client that will answer if typed
+# into. Every desktop-origin conversion leaves one behind, structurally. The data is
+# never at risk (one transcript on disk either way), but two answering copies of one
+# agent is the singleton rule broken in the UI, so closing the native chat is a
+# REQUIRED step of a desktop-origin conversion, not a tip.
+if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && [ "${CLAUDE_CODE_ENTRYPOINT:-cli}" != "cli" ]; then
+  cat <<FOSSIL_EOF
+
+  *** REQUIRED, because this conversation was born in the desktop app: ***
+  the desktop still holds its NATIVE chat for this conversation, and that chat is a
+  live second copy of this agent, it will answer if typed into. archive it in the
+  desktop app once the body is up. archiving removes the surface, not the data: the
+  transcript on disk is the conversation, and the body carries all of it.
+FOSSIL_EOF
+fi
 echo "if a session was already running under that name, it was adopted (not restarted)."

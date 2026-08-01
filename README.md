@@ -119,6 +119,15 @@ succeeds, the body comes up FRESH, and you are left looking at two live sessions
 conversation, and a brand-new empty agent beside it. Nothing errored, so nothing told you the promise
 had quietly inverted. Now it does.
 
+## a waterbeared agent is a singleton
+
+One conversation, one body, ever. The installer refuses to wire a conversation that already has a
+body under any name, and tells you where the existing one is. The one surface it cannot close for
+you: a conversation born in the desktop app keeps its native chat there, alongside the remote-control
+entry (mobile dedupes these, desktop shows both). That native chat is a live second copy, so the
+installer tells you to archive it, and that instruction is part of the conversion, not a suggestion.
+Archiving removes the surface, never the data.
+
 ## waterbear yourself: it just takes over
 
 Running the installer from inside a session starts the durable body immediately, and the body resumes
