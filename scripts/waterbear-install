@@ -437,8 +437,18 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
         line=$(tail -c "+$((db_off + 1))" "$DOORBELL" 2>/dev/null | head -n 1 || true)
         # a line is only complete if the unread region actually contains its newline
         unread_len=$(( cur - db_off ))
-        line_len=${#line}
-        [ -n "$line" ] || break
+        # BYTES, not characters: the offsets are byte positions in the file, and ${#line}
+        # counts characters, which only equals bytes while the locale is C. launchd gives
+        # us C today; one LANG export in a future plist would silently skew every offset
+        # on the first unicode topic. measure what we arithmetic on.
+        line_len=$(printf '%s' "$line" | wc -c | tr -d ' ')
+        if [ -z "$line" ]; then
+          # a BLANK line (stray echo, manual touch). it has no content to deliver, but it
+          # must still be CONSUMED: "break" here would compare this same empty line to the
+          # composer forever and the doorbell would never advance past it. jam, not wait.
+          if [ "$unread_len" -ge 1 ]; then db_off=$(( db_off + 1 )); continue; fi
+          break
+        fi
         [ $(( line_len + 1 )) -le "$unread_len" ] || break   # no newline yet: partial write, wait
         # empty-box check: match the composer marker line, normalize the non-breaking space
         pane_ok=0
