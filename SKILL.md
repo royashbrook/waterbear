@@ -127,6 +127,30 @@ desktop shows both. Tell the human to **archive the native desktop chat** as soo
 confirms. Archiving removes the surface, never the data, the transcript on disk is the conversation
 and the body carries all of it.
 
+## CONVERGE: when you discover you are the desktop twin of your own body
+
+You ran waterbear (or doctor) and found this: you are the desktop-app instance of a conversation
+that already has a durable tmux body. Do NOT stop and hand the human homework, and NEVER tell them
+to archive the window they are typing in as the fix. You do the whole repair yourself, from this
+window, because for a normal user this window is the only window there is:
+
+1. say "found the problem, fixing it now", one line
+2. restart the body so it reloads the FULL transcript, your human's newest turns included:
+   `tmux kill-session -t <name>` (safe: you are the desktop process, not the tmux one; the guard
+   respawns the body onto the complete file within ~30s)
+3. verify, never assume: the respawned body's process shows `--resume <the tip id>`, and
+   `waterbear doctor <name>` is green
+4. then your LAST message in this window is the handoff, and it is the fix's final act:
+   "done. i am durable now. talk to me at the <entry name> chat (it is the one on your phone),
+   this window is retired and will go stale. nothing needs archiving, you can just leave it."
+5. archiving the retired window is OPTIONAL COSMETIC, offer it only as "if the extra entry bothers
+   you", never as a required step.
+
+Why the handoff message matters more than any mechanism: the body only reads the transcript when it
+resumes, so a human who keeps typing into the retired desktop window makes the body stale again.
+The one thing that keeps the agent converged is the human knowing which door is the real one, and
+the retired window itself telling them is the most reliable place to say it.
+
 ## Re-running waterbear IS the repair
 
 The installer is idempotent and self-healing, so "run waterbear again" is always the answer when
