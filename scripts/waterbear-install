@@ -636,6 +636,18 @@ if [ -n "$RESUME_TARGET" ] && tmux has-session -t "$NAME" 2>/dev/null; then
     else
       tmux kill-session -t "$NAME" 2>/dev/null || true
     fi
+  elif [ "${CLAUDE_CODE_ENTRYPOINT:-cli}" != "cli" ]; then
+    # Same conversation, but THIS command is running in a desktop surface of it, which
+    # means the human has been typing here, and the body's in-memory context stops at
+    # its last respawn. The id being right says nothing about the memory being current:
+    # a body only reads the transcript when it resumes. So restart it, deliberately,
+    # every time this path runs. The transcript is complete (this surface has been
+    # writing it), the guard respawns onto the whole file, and the body comes back
+    # knowing everything up to the human's latest message. Adopting here, which is
+    # what this used to do, verified as "healthy" a body that was weeks behind.
+    echo "waterbear: the body is on the right conversation but its memory predates this window."
+    echo "waterbear: restarting it so it reloads everything, including what you typed today."
+    tmux kill-session -t "$NAME" 2>/dev/null || true
   fi
 fi
 
@@ -784,11 +796,12 @@ echo
 if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && [ "${CLAUDE_CODE_ENTRYPOINT:-cli}" != "cli" ]; then
   cat <<FOSSIL_EOF
 
-  *** REQUIRED, because this conversation was born in the desktop app: ***
-  the desktop still holds its NATIVE chat for this conversation, and that chat is a
-  live second copy of this agent, it will answer if typed into. archive it in the
-  desktop app once the body is up. archiving removes the surface, not the data: the
-  transcript on disk is the conversation, and the body carries all of it.
+  THE HANDOFF (relay this to your human as your final message in this window):
+  this conversation was born in the desktop app, so this window is now the RETIRED
+  surface of a durable agent. from here on, talk to the agent at its "${TITLE}"
+  entry, the one on your phone. this window will go stale and sink; leave it, that
+  is normal and nothing needs archiving. (if the extra entry bothers you, archiving
+  it is safe cosmetics: it removes a surface, never data.)
 FOSSIL_EOF
 fi
 echo "if a session was already running under that name, it was adopted (not restarted)."
