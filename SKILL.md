@@ -127,6 +127,22 @@ desktop shows both. Tell the human to **archive the native desktop chat** as soo
 confirms. Archiving removes the surface, never the data, the transcript on disk is the conversation
 and the body carries all of it.
 
+## Re-running waterbear IS the repair
+
+The installer is idempotent and self-healing, so "run waterbear again" is always the answer when
+something looks wrong, typed into ANY of the agent's windows:
+
+1. **a compact rolled the conversation**: desktop compacts silently start a new conversation that
+   continues the old one, so a body can end up faithfully persisting a conversation the human
+   already left. The installer walks the continuation chain (the new conversation records its
+   parent) and resumes the TIP, wherever the command was typed. The stale window and the live
+   window converge on the same answer.
+2. **the body is on the wrong conversation**: a running same-name body that does not match the
+   target is replaced, and the replacement is deferred + forked when the body being replaced is the
+   one running the command, so it finishes saying what is happening before its floor is removed.
+3. **everything is already right**: nothing happens. A correct install re-run is a no-op, which is
+   what makes it safe to tell a confused user "just run it again".
+
 ## The singleton rule
 
 A waterbeared agent is ONE agent. The installer enforces the half it can see: if a conversation

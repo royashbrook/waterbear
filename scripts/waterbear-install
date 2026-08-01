@@ -181,6 +181,59 @@ MISMATCH_EOF2
   fi
 fi
 
+# --- FOLLOW THE CONTINUATION CHAIN (a compact rolls the conversation id) ---
+#
+# A desktop compact quietly starts a NEW conversation that continues the old one: the
+# human's window never blinks, but the id changes, and a body pinned to the old id is
+# now faithfully persisting a conversation the human has already left. Every desktop
+# compact does this. Seen live: a body three days behind its human, one compact apart.
+#
+# The continuation records its parent (the old id appears in its opening lines), so
+# the chain is walkable: canon is the TIP of the chain, not whichever window this
+# command happened to be typed into. Typing the fix into the stale window and typing
+# it into the live one converge on the same answer, which is what makes this safe to
+# hand to a user without asking them to diagnose anything.
+case " $* " in *" --no-chain "*) NO_CHAIN=1 ;; *) NO_CHAIN=0 ;; esac
+if [ -n "$RESUME_TARGET" ] && [ "$NO_CHAIN" -eq 0 ] && command -v python3 >/dev/null 2>&1; then
+  TIP="$(python3 - "$RESUME_TARGET" "$PROJ_DIR" <<'CHAIN_PY'
+import os, sys
+cur, projdir = sys.argv[1], sys.argv[2]
+seen = {cur}
+while True:
+    children = []
+    try: names = os.listdir(projdir)
+    except OSError: break
+    for n in names:
+        if not n.endswith('.jsonl'): continue
+        cid = n[:-6]
+        if cid in seen: continue
+        f = os.path.join(projdir, n)
+        try:
+            with open(f, 'rb') as fh: head = fh.read(120000)
+            if cur.encode() in head:
+                children.append((os.path.getmtime(f), cid))
+        except OSError: continue
+    if not children: break
+    children.sort()
+    cur = children[-1][1]
+    seen.add(cur)
+print(cur)
+CHAIN_PY
+)"
+  if [ -n "$TIP" ] && [ "$TIP" != "$RESUME_TARGET" ]; then
+    cat <<CHAIN_EOF
+waterbear: the recorded conversation has CONTINUED. a compact rolled it forward:
+  recorded : ${RESUME_TARGET}
+  the tip  : ${TIP}
+  following the chain. the tip is where the human actually is; the recorded id is a
+  conversation they already left. the body will resume the tip.
+CHAIN_EOF
+    printf '%s\n' "$RESUME_TARGET" > "$SESSION_FILE.superseded" 2>/dev/null || true
+    printf '%s\n' "$TIP" > "$SESSION_FILE"
+    RESUME_TARGET="$TIP"
+  fi
+fi
+
 # --- ONE CONVERSATION, ONE BODY (the singleton rule) ---
 #
 # The product promise is that a waterbeared agent is a SINGLETON: use waterbear on
@@ -558,6 +611,34 @@ PLIST_EOF
 # but the body does NOT start. The human closes the caller, and the body comes up
 # either on the next login (launchd) or immediately via `waterbear start`. One
 # session, never two. `--now` overrides for anyone who knows what they are doing.
+# --- TAKEOVER: a running body on the WRONG conversation gets replaced ---
+#
+# Re-running waterbear is the repair path, so the installer must handle the body it
+# is repairing. If a session with this name is already up but resuming a different
+# conversation than the (chain-followed) target, adopting it would persist the wrong
+# conversation forever. Replace it: the pointer is already correct on disk, so
+# killing the session makes the guard respawn it onto the right one.
+#
+# When the session being replaced is the one running THIS installer, the kill is
+# deferred and forked, so the command finishes cleanly before its own floor is
+# removed. Same conversation already? Nothing happens, which makes re-running
+# waterbear always safe: correct installs are no-ops, wrong ones self-heal.
+SELF_TAKEOVER=0
+if [ -n "$RESUME_TARGET" ] && tmux has-session -t "$NAME" 2>/dev/null; then
+  body_pane="$(tmux display -p -t "$NAME" '#{pane_pid}' 2>/dev/null || true)"
+  body_id="$(ps -o command= -p "$body_pane" 2>/dev/null | grep -oE -- '--resume [a-f0-9-]+' | awk '{print $2}' || true)"
+  if [ "$body_id" != "$RESUME_TARGET" ]; then
+    my_session=""
+    [ -n "${TMUX_PANE:-}" ] && my_session="$(tmux display -p '#{session_name}' 2>/dev/null || true)"
+    echo "waterbear: the running \"$NAME\" body is on ${body_id:-no conversation}, not the target. replacing it."
+    if [ "$my_session" = "$NAME" ]; then
+      SELF_TAKEOVER=1
+    else
+      tmux kill-session -t "$NAME" 2>/dev/null || true
+    fi
+  fi
+fi
+
 # DEFAULT IS START NOW, including from inside the session being made durable. The
 # deferred handoff shipped as the default for two days and every single operator who
 # met it, without exception, read a correct result as an incomplete one: "done" followed
@@ -711,3 +792,13 @@ if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && [ "${CLAUDE_CODE_ENTRYPOINT:-cli}" !=
 FOSSIL_EOF
 fi
 echo "if a session was already running under that name, it was adopted (not restarted)."
+if [ "$SELF_TAKEOVER" -eq 1 ]; then
+  cat <<SELFTK_EOF
+
+  this session IS the body being replaced, so the restart is deferred a few seconds:
+  this window will end and the body will come back resuming the tip. nothing is lost,
+  the conversation is on disk and the pointer already names it.
+SELFTK_EOF
+  ( sleep 4; tmux kill-session -t "$NAME" 2>/dev/null ) >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+fi
