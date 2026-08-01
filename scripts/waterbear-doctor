@@ -146,6 +146,48 @@ TWIN_PY
   fi
 
 
+  # BODY MEMORY AGE. Every check above verifies the ID; none verify the MEMORY. A body
+  # only reads its transcript at respawn, so a human typing into another surface (a
+  # desktop twin) advances the file while the body's context stands still. That gap is
+  # invisible to pointer checks, and it is precisely what "my agent is missing this
+  # week" looks like. Measure it: newest non-cli entry vs body process start time.
+  if tmux has-session -t "$name" 2>/dev/null && command -v python3 >/dev/null 2>&1; then
+    bpane="$(tmux display -p -t "$name" '#{pane_pid}' 2>/dev/null || true)"
+    bstart="$(ps -o lstart= -p "$bpane" 2>/dev/null || true)"
+    if [ -n "$bstart" ]; then
+      lag="$(python3 - "$t" "$bstart" <<'LAG_PY'
+import json, sys, datetime
+path, lstart = sys.argv[1], sys.argv[2]
+try:
+    start = datetime.datetime.strptime(lstart.strip(), '%a %b %d %H:%M:%S %Y')
+except ValueError:
+    sys.exit(0)
+newest = None
+with open(path) as f:
+    for line in f:
+        try: d = json.loads(line)
+        except Exception: continue
+        if d.get('entrypoint') and d['entrypoint'] != 'cli' and d.get('timestamp'):
+            newest = d['timestamp']
+if not newest: sys.exit(0)
+ts = datetime.datetime.strptime(newest[:19], '%Y-%m-%dT%H:%M:%S')
+offset = datetime.datetime.now() - datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+ts_local = ts + offset
+gap = (ts_local - start).total_seconds()
+if gap > 300:
+    print(int(gap // 60))
+LAG_PY
+)"
+      if [ -n "$lag" ]; then
+        printf '                 BODY MEMORY IS ~%s MINUTES BEHIND: another surface wrote the transcript\n' "$lag"
+        printf '                 after this body last loaded it. the id is right, the memory is not.\n'
+        printf '                 fix: restart the body (tmux kill-session -t %s; the guard respawns\n' "$name"
+        printf '                 it onto the complete file).\n'
+        rc=1
+      fi
+    fi
+  fi
+
   d="$HOME/.claude/rc-session-${name}.declined"
   if [ -f "$d" ]; then
     printf '%-14s   note: capture hook declined a write, %s\n' "" "$(cat "$d")"

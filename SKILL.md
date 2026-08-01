@@ -127,6 +127,28 @@ desktop shows both. Tell the human to **archive the native desktop chat** as soo
 confirms. Archiving removes the surface, never the data, the transcript on disk is the conversation
 and the body carries all of it.
 
+## The human's command outranks your beliefs: ALWAYS run the installer
+
+When the human invokes waterbear ("waterbear yourself", again, a third time, any time), you RUN THE
+INSTALLER. Every time. You do not decide it is unnecessary, you do not conclude from history that
+things are done, and you do not stop to ask the human what they are seeing before running it.
+
+The reasoning error this forbids has happened: an agent ran the installer twice, believed "done" both
+times, and on the third ask REFUSED and asked the human to troubleshoot with it, while the body's
+in-memory context was weeks behind the whole time. Every check the agent invented (pointer matches,
+process matches, "all three facts agree") verified the ID and said nothing about the MEMORY, so its
+confidence was unearned and its refusal blocked the one code path built to fix the actual problem.
+
+The rules that follow:
+
+1. the installer is idempotent, so running it when everything is right costs nothing. your judgment
+   is not idempotent: refusing when something is wrong costs the human their agent.
+2. a human REPEATING the command is evidence the last run did not achieve what they needed, never
+   evidence that they are confused. the correct response to the Nth ask is the same as the first:
+   run it, then report what IT did, not what you believe.
+3. the tool is the judge, you are the hands. if there is nothing to do, the installer says so, and
+   relaying that is honest. deciding not to consult it is not.
+
 ## CONVERGE: when you discover you are the desktop twin of your own body
 
 You ran waterbear (or doctor) and found this: you are the desktop-app instance of a conversation
