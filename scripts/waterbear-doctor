@@ -58,11 +58,30 @@ for name in "${names[@]}"; do
     continue
   fi
 
-  t="$(find "$PROJECTS" -name "${sid}.jsonl" -type f 2>/dev/null | head -1)"
+  # ALL matches, not the first: a resume launched from the wrong project directory
+  # can mint a same-id STUB transcript in that directory (observed: 15 entries, one
+  # minute long, beside a 6.5 MB original). A later resume from the stub's directory
+  # would "succeed" into the ghost and look healthy. Two files with one id is always
+  # wrong and always worth shouting about.
+  matches="$(find "$PROJECTS" -name "${sid}.jsonl" -type f 2>/dev/null)"
+  t="$(printf '%s\n' "$matches" | head -1)"
+  match_n="$(printf '%s\n' "$matches" | grep -c . || true)"
   if [ -z "$t" ]; then
     printf '%-14s DEAD POINTER: %s names no transcript on disk.\n' "$name" "${sid:0:8}…"
     rc=1
     continue
+  fi
+  if [ "$match_n" -gt 1 ]; then
+    printf '%-14s DUPLICATE TRANSCRIPTS for %s… in %s project dirs:\n' "$name" "${sid:0:8}" "$match_n"
+    printf '%s\n' "$matches" | while IFS= read -r m; do
+      printf '      %8.0f KB  %s\n' "$(( $(wc -c < "$m") / 1024 ))" "${m#$PROJECTS/}"
+    done
+    echo "      the big one is the conversation; a small one is a stub minted by a resume"
+    echo "      from the wrong directory, and it can SHADOW the real one. quarantine the"
+    echo "      stub (move it out of ~/.claude/projects, do not delete it)."
+    rc=1
+    # prefer the largest as the one to report on
+    t="$(printf '%s\n' "$matches" | while IFS= read -r m; do printf '%s %s\n' "$(wc -c < "$m")" "$m"; done | sort -rn | head -1 | cut -d' ' -f2-)"
   fi
 
   kb=$(( $(wc -c < "$t") / 1024 ))

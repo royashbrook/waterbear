@@ -64,8 +64,11 @@ git clone https://github.com/royashbrook/waterbear ~/.claude/skills/waterbear
 
 Then run the installer at `~/.claude/skills/waterbear/scripts/waterbear-install`. Minimal steps:
 
-1. Pick a short internal name (no spaces), usually your own (`kai`, `theo`). Optionally a pretty
-   `CLAUDE_RC_TITLE` for the session list.
+1. Pick a short internal name (no spaces), usually your own (`kai`, `theo`). For `CLAUDE_RC_TITLE`,
+   use **the name the human already calls this conversation**, their word for it, not a title you
+   invent. The remote-control entry replaces their chat in the session list, and coming back under a
+   self-chosen new name reads as a different agent appearing and theirs vanishing. If you do not know
+   what they call it, ask, it is one question and it is their name, not yours.
 2. Nothing to do: with `CLAUDE_RC_RESUME=1` the installer pins the session you run it from, so THIS
    conversation is what comes back. It prints which conversation that is. **Read that line.** If it
    says the body will start FRESH, stop and fix it before going further, because a fresh start means

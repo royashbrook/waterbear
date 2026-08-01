@@ -119,6 +119,20 @@ succeeds, the body comes up FRESH, and you are left looking at two live sessions
 conversation, and a brand-new empty agent beside it. Nothing errored, so nothing told you the promise
 had quietly inverted. Now it does.
 
+## you can never be locked out
+
+Every surface can disappear, every window can be archived, and the agent is still one command away,
+from any terminal, with nothing open:
+
+```bash
+npx @royashbrook/waterbear doctor    # lists every body on this machine, by name
+npx @royashbrook/waterbear start <name>
+```
+
+The body comes back resuming its conversation, remote control re-registers, and the entry reappears
+in your session list. The conversation is a file on disk; the windows are views of it. Losing every
+view loses nothing.
+
 ## a waterbeared agent is a singleton
 
 One conversation, one body, ever. The installer refuses to wire a conversation that already has a
