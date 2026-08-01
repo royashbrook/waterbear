@@ -1,0 +1,103 @@
+name: release
+
+# Publishes @royashbrook/waterbear on every push to main.
+#
+# THE VERSION IS DERIVED, NOT STORED. major.minor come from the latest git tag,
+# and the patch is the number of commits since that tag, so `v1.1` plus 4 commits
+# publishes as 1.1.4. Cutting a minor release is therefore just `git tag v1.2`,
+# and every commit after it numbers itself.
+#
+# The consequence worth understanding: a committed file can never hold its own
+# accurate version, because the patch depends on the commit that contains it. So
+# package.json and SKILL.md carry the tag-level BASE in the repo, and the computed
+# value is stamped into the published artifact only. Nothing is committed back,
+# which keeps CI from generating commits that would themselves move the number.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Trusted publishing (OIDC): GitHub mints a short-lived identity token per run and npm
+# verifies it against the publisher configured on the package. No NPM_TOKEN, nothing
+# stored, nothing to rotate. `id-token: write` is what allows that token to be minted.
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # full history + tags: the version IS the tag plus the commit count, and a
+      # shallow clone has neither, so it would silently compute something wrong.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # OIDC trusted publishing needs npm >= 11.5.1 and the runner ships older
+      - name: npm with trusted publishing support
+        run: npm install -g npm@latest
+
+      - name: derive the version
+        id: v
+        run: |
+          TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          if [ -z "$TAG" ]; then
+            echo "no tag found. tag the repo (e.g. git tag v1.1) before releasing."
+            exit 1
+          fi
+          COUNT="$(git rev-list "${TAG}..HEAD" --count)"
+          VERSION="${TAG#v}.${COUNT}"
+          echo "tag=$TAG commits-since=$COUNT version=$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: stamp it into the artifact
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const v = process.env.VERSION;
+            const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            p.version = v;
+            fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n");
+            const s = fs.readFileSync("SKILL.md", "utf8");
+            if (!/^version:\s*\S+\s*$/m.test(s)) {
+              console.error("SKILL.md frontmatter has no version: line to stamp.");
+              process.exit(1);
+            }
+            fs.writeFileSync("SKILL.md", s.replace(/^version:\s*\S+\s*$/m, "version: " + v));
+            console.log("stamped " + v + " into package.json + SKILL.md");
+          '
+
+      - run: npm test
+
+      - name: already published?
+        id: pub
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          # npm versions are immutable, so a re-run of the same commit must not fail
+          # the build. Skip cleanly instead: nothing changed, nothing to publish.
+          if npm view "@royashbrook/waterbear@$VERSION" version >/dev/null 2>&1; then
+            echo "$VERSION is already on npm, nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: publish (via OIDC)
+        if: steps.pub.outputs.skip == 'false'
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          npm publish --access public
+          echo "published @royashbrook/waterbear@$VERSION"

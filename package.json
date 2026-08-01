@@ -1,6 +1,6 @@
 {
   "name": "@royashbrook/waterbear",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Keep a CLI agent session alive through crashes, patches, quits, and reboots, and resume the same conversation when it comes back. macOS/launchd + tmux.",
   "bin": {
     "waterbear": "bin/waterbear.js"

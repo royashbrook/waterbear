@@ -52,6 +52,33 @@ if ! launchctl bootstrap "gui/${USER_ID}" "$PLIST" 2>/dev/null; then
 fi
 launchctl enable "gui/${USER_ID}/${LABEL}" 2>/dev/null || true
 
+# VERIFY, do not assume. launchctl returning says launchd accepted the job, not that
+# a body exists: the guard probes connectivity and waits for the UI to settle, so the
+# tmux session appears seconds later, and a genuine failure appears never. Reporting
+# "started" on the launchctl call is how you get told a body is up while nothing is
+# running, which is the quietest failure this tool has.
+STARTED=0
+for _ in $(seq 1 45); do
+  if tmux has-session -t "$NAME" 2>/dev/null; then STARTED=1; break; fi
+  sleep 1
+done
+
+if [ "$STARTED" -eq 0 ]; then
+  cat >&2 <<FAILED_EOF
+waterbear: STARTED THE AGENT, BUT NO BODY APPEARED.
+
+  launchd accepted the job and no tmux session named "${NAME}" exists after 45s.
+
+  look, in order:
+    tail /tmp/${LABEL}.err
+    launchctl print gui/${USER_ID}/${LABEL} | grep -E 'state|last exit'
+    tmux ls
+
+  the wiring is intact, so it will also try again at next login.
+FAILED_EOF
+  exit 1
+fi
+
 echo "waterbear: started \"${NAME}\"."
 echo "  attach : tmux attach -t ${NAME}   (also on your phone / desktop app / claude.ai)"
 echo "  logs   : /tmp/${LABEL}.log   /tmp/${LABEL}.err"

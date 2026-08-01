@@ -51,7 +51,7 @@ set -euo pipefail
 
 NAME="${CLAUDE_RC_NAME:-claude}"
 TITLE="${CLAUDE_RC_TITLE:-$NAME}"
-WORKDIR="${CLAUDE_RC_DIR:-$HOME}"
+WORKDIR="${CLAUDE_RC_DIR:-$PWD}"
 WAKE="${CLAUDE_RC_WAKE:-}"
 RESUME="${CLAUDE_RC_RESUME:-}"
 RESUME_WAKE="${CLAUDE_RC_RESUME_WAKE:-}"
@@ -81,18 +81,148 @@ SESSION_FILE="${CLAUDE_RC_SESSION_FILE:-$HOME/.claude/rc-session-$NAME}"
 # either way SAY which conversation the body will come back as. A fresh start is a
 # legitimate choice (`--no-pin`, or a first-ever install with nothing to carry), but it
 # must never be the silent default of a self-install.
+#
+# AND IT ONLY FILLS AN EMPTY SLOT. "The session running this" is not reliably "the
+# session this is about": a guardian standing up a body FOR another seat runs the
+# installer from its own session, having deliberately pre-seeded the target's id.
+# Pinning unconditionally there overwrites that pointer with the installer's own, and
+# the body comes back as the WRONG AGENT, with both seats looking healthy and one
+# transcript now serving two identities. (Caught in practice within a day of the pin
+# landing, on the very path the guardian uses for every conversion.)
+#
+# So an existing, different id is treated as somebody's deliberate decision and is
+# never silently replaced. `--pin` forces ours in when the recorded one is known stale;
+# `--no-pin` declines to write at all.
 PIN_SID=""
+PIN_DECLINED=""
+PIN_REPLACED=""
 case " $* " in *" --no-pin "*) NO_PIN=1 ;; *) NO_PIN=0 ;; esac
+case " $* " in *" --pin "*) FORCE_PIN=1 ;; *) FORCE_PIN=0 ;; esac
 if [ "$RESUME" = "1" ] && [ "$NO_PIN" -eq 0 ] && [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then
-  PIN_SID="$CLAUDE_CODE_SESSION_ID"
-  mkdir -p "$(dirname "$SESSION_FILE")"
-  printf '%s\n' "$PIN_SID" > "$SESSION_FILE"
-  rm -f "$SESSION_FILE.consumed" 2>/dev/null || true
+  EXISTING=""
+  [ -s "$SESSION_FILE" ] && EXISTING="$(head -n1 "$SESSION_FILE" | tr -d '[:space:]')"
+  if [ -n "$EXISTING" ] && [ "$EXISTING" != "$CLAUDE_CODE_SESSION_ID" ] && [ "$FORCE_PIN" -eq 0 ]; then
+    # THE LIVE SESSION IS CANON. A recorded id is a claim about the past and can be
+    # stale; the session you are standing in is a fact. Resuming a dead conversation
+    # because a leftover file said so is the failure this whole feature exists to
+    # prevent, so for a self-install the live session wins even against a recorded id.
+    #
+    # The cost is the other direction: installing FOR another seat means the recorded
+    # id is deliberate and ours is the wrong one. That path declares itself with
+    # --no-pin. To keep a forgotten flag from being lossy, the replaced id is written
+    # beside the file and announced loudly rather than silently dropped, so a
+    # cross-wire is recoverable in one command instead of gone.
+    PIN_REPLACED="$EXISTING"
+    printf '%s\n' "$EXISTING" > "$SESSION_FILE.replaced" 2>/dev/null || true
+    PIN_SID="$CLAUDE_CODE_SESSION_ID"
+    mkdir -p "$(dirname "$SESSION_FILE")"
+    printf '%s\n' "$PIN_SID" > "$SESSION_FILE"
+    rm -f "$SESSION_FILE.consumed" 2>/dev/null || true
+  else
+    PIN_SID="$CLAUDE_CODE_SESSION_ID"
+    mkdir -p "$(dirname "$SESSION_FILE")"
+    printf '%s\n' "$PIN_SID" > "$SESSION_FILE"
+    rm -f "$SESSION_FILE.consumed" 2>/dev/null || true
+  fi
 fi
 # whatever the body will actually resume, resolved here so the summary cannot lie
 RESUME_TARGET=""
 if [ "$RESUME" = "1" ] && [ -s "$SESSION_FILE" ]; then
   RESUME_TARGET="$(head -n1 "$SESSION_FILE" | tr -d '[:space:]')"
+fi
+
+# --- WATERBEAR NEVER MOVES YOUR AGENT ---
+#
+# The promise is "identical, except now it cannot be killed". The working directory
+# is part of identical. An agent working in ~/code/foo that comes back in a different
+# directory is not the same agent, whatever its transcript says.
+#
+# This matters mechanically, not just philosophically: `claude --resume <id>` resolves
+# a session WITHIN THE PROJECT DIRECTORY it is launched from. Point the body at a
+# different directory and the id is simply not there, so the resume finds nothing and
+# falls back to a FRESH session. Nothing errors. You are left with your real
+# conversation in one place and a brand-new empty agent in another, and the new one's
+# capture hook then overwrites the pointer to the real one within seconds.
+#
+# That happened. It is the whole failure, and it is invisible at every step.
+#
+# So: if we are going to resume a conversation, that conversation must live in the
+# directory we are about to run in. If it does not, refuse and say where it actually
+# lives, because the caller has almost certainly passed a directory that means
+# something to them (a "home" for the agent) rather than the one the agent is in.
+if [ -n "$RESUME_TARGET" ]; then
+  # ~/.claude/projects encodes a path by replacing every / and . with -
+  PROJ_DIR="$HOME/.claude/projects/$(printf '%s' "$WORKDIR" | tr '/.' '--')"
+  if [ ! -f "$PROJ_DIR/$RESUME_TARGET.jsonl" ]; then
+    ACTUAL="$(find "$HOME/.claude/projects" -name "$RESUME_TARGET.jsonl" -maxdepth 2 2>/dev/null | head -1)"
+    cat >&2 <<MISMATCH_EOF
+waterbear: REFUSING. that conversation does not live in the directory you gave me.
+
+  conversation : ${RESUME_TARGET}
+  you asked me to run it in : ${WORKDIR}
+MISMATCH_EOF
+    if [ -n "$ACTUAL" ]; then
+      printf '  it actually lives in   : %s
+' "$(dirname "$ACTUAL" | sed "s|$HOME/.claude/projects/||")" >&2
+    fi
+    cat >&2 <<'MISMATCH_EOF2'
+
+  `claude --resume` only finds a session inside its own project directory, so this
+  would NOT have failed loudly. It would have started a FRESH conversation instead,
+  leaving you with your real agent in one place and an empty one in another.
+
+  waterbear does not move your agent. Run the installer from the directory the agent
+  is actually working in (that is the default), or set CLAUDE_RC_DIR to it.
+
+  If you genuinely want a body somewhere else with a fresh start, say so explicitly:
+  pass --no-pin and unset CLAUDE_RC_RESUME.
+MISMATCH_EOF2
+    exit 1
+  fi
+fi
+
+# --- ONE CONVERSATION, ONE BODY (the singleton rule) ---
+#
+# The product promise is that a waterbeared agent is a SINGLETON: use waterbear on
+# it and it comes back as one durable copy of itself, never two. The way two copies
+# actually happen is not a race, it is a re-install: a conversation that already has
+# a durable body gets waterbeared again under a new name (a rename ceremony, a wake
+# in a fossil desktop chat that no longer knows it has a body, an operator retrying),
+# and now two guards resume one transcript.
+#
+# The installer can see this coming, because the resume pointers are all in one
+# place. If any OTHER body already pins this conversation id, refuse, and say which
+# body owns it and how to reach it.
+if [ -n "$RESUME_TARGET" ]; then
+  for other in "$HOME"/.claude/rc-session-*; do
+    [ -f "$other" ] || continue
+    case "$other" in *.consumed|*.declined|*.replaced) continue ;; esac
+    [ "$other" = "$SESSION_FILE" ] && continue
+    other_id="$(head -n1 "$other" | tr -d '[:space:]')"
+    [ "$other_id" = "$RESUME_TARGET" ] || continue
+    oname="$(basename "$other" | sed 's/^rc-session-//')"
+    if tmux has-session -t "$oname" 2>/dev/null; then
+      cat >&2 <<TWIN_EOF
+waterbear: REFUSING. this conversation already has a live durable body: "${oname}".
+
+  a waterbeared agent is a singleton. installing again under "${NAME}" would put two
+  guards on one transcript, and you would meet your agent twice.
+
+  reach the existing body instead:  tmux attach -t ${oname}   (or its remote-control entry)
+  renaming it? take the old body down first:  waterbear-uninstall ${oname}
+TWIN_EOF
+    else
+      cat >&2 <<TWIN_EOF2
+waterbear: REFUSING. this conversation is already wired to a body named "${oname}"
+(currently not running).
+
+  start that one instead:   waterbear start ${oname}
+  renaming it to "${NAME}"? retire the old wiring first:  waterbear-uninstall ${oname}
+  (that preserves the resume pointer; move it with:  mv ~/.claude/rc-session-${oname} ~/.claude/rc-session-${NAME})
+TWIN_EOF2
+    fi
+    exit 1
+  done
 fi
 
 
@@ -200,8 +330,30 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
     tmux new-session -d -s "$NAME" -e "CLAUDE_RC_NAME=$NAME" -c "$WORKDIR" "claude --remote-control \"$TITLE\" --resume $SID"
     NUDGE="$RESUME_WAKE"
   else
+    # A fresh start that was ASKED FOR is normal. A fresh start we FELL BACK to is an
+    # incident, and until now the two were indistinguishable: the guard typed the
+    # identity-bootstrap wake prompt either way, as if nothing had gone wrong.
+    #
+    # That is the worst moment to run an unconstrained prompt. CLAUDE_RC_WAKE only
+    # ever fires when the intended thing did not happen, and a bootstrap that says
+    # "self-locate, your home is X" will competently act on that in a session that
+    # was supposed to be a resume. Seen for real: a body meant to resume an existing
+    # conversation came up fresh, read its wake prompt, and relocated itself.
+    #
+    # So say it, in the log and in the session. It costs one line and it turns a
+    # silent wrong-turn into something the human can see happening.
+    if [ "$RESUME" = "1" ]; then
+      echo "waterbear: WANTED TO RESUME AND COULD NOT. no recorded session id." >&2
+      echo "waterbear: this is a FRESH conversation, not the one you meant to continue." >&2
+      echo "waterbear: check ${SESSION_FILE} and ${SESSION_FILE}.consumed" >&2
+    fi
     tmux new-session -d -s "$NAME" -e "CLAUDE_RC_NAME=$NAME" -c "$WORKDIR" "claude --remote-control \"$TITLE\""
     NUDGE="$WAKE"
+    if [ "$RESUME" = "1" ]; then
+      # prepend the warning to whatever bootstrap was configured, so the agent knows
+      # its own situation before it acts on an identity prompt
+      NUDGE="NOTE: a resume was intended and failed, so this is a FRESH session, not a continuation. Do not assume prior context exists, and do not relocate or reconfigure anything until the human confirms. ${WAKE}"
+    fi
   fi
   # launchd has no hands. if a prompt is set, type it into the session once its UI has settled
   # (drawn the input box), so a respawn comes up as itself, not a blank assistant. a positional
@@ -396,17 +548,43 @@ PLIST_EOF
 # but the body does NOT start. The human closes the caller, and the body comes up
 # either on the next login (launchd) or immediately via `waterbear start`. One
 # session, never two. `--now` overrides for anyone who knows what they are doing.
+# DEFAULT IS START NOW, including from inside the session being made durable. The
+# deferred handoff shipped as the default for two days and every single operator who
+# met it, without exception, read a correct result as an incomplete one: "done" followed
+# by numbered homework is a mixed signal no wording fixes. And the hazard it guarded
+# against turned out not to exist on the intended path: the CLI body resumes the SAME
+# conversation (same id, one transcript, verified repeatedly), the old client is a view
+# that catches up when remote control registers. Nothing forks. The alarming case we
+# were defending against was a different bug (a fresh start from a bad pin), fixed at
+# the pin and by the never-move guard, not by making every user do a two-step.
+#
+# --defer keeps the old behavior for anyone who wants the explicit handoff.
 IN_SESSION=0
-[ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && IN_SESSION=1
-case " $* " in *" --now "*) IN_SESSION=0 ;; esac
 case " $* " in *" --defer "*) IN_SESSION=1 ;; esac
 
 # A fresh start is a real choice, and it is also the outcome that silently breaks the
 # promise, so it gets said out loud on every path rather than inferred from a blank field.
 announce_target() {
   if [ -n "$RESUME_TARGET" ]; then
-    echo "  this body WILL come back as your current conversation ($(printf '%s' "$RESUME_TARGET" | cut -c1-8)...)."
-    [ -n "$PIN_SID" ] && echo "  (pinned from the session you ran this in.)"
+    if [ -n "$PIN_SID" ]; then
+      echo "  this body WILL come back as your current conversation ($(printf '%s' "$RESUME_TARGET" | cut -c1-8)...)."
+      echo "  (pinned from the session you ran this in.)"
+      if [ -n "$PIN_REPLACED" ]; then
+        echo
+        echo "  *** it previously pointed at $(printf '%s' "$PIN_REPLACED" | cut -c1-8)..., which has been REPLACED. ***"
+        echo "  the live session wins over a recorded one, because a recorded id can be stale and"
+        echo "  resuming a dead conversation is the failure this is meant to prevent."
+        echo "  installing this FOR ANOTHER SEAT? then that id was deliberate and yours is wrong."
+        echo "  put it back with:  cp '$SESSION_FILE.replaced' '$SESSION_FILE'"
+        echo "  and re-run with --no-pin, which is the flag for installing on someone else's behalf."
+      fi
+    elif [ -n "$PIN_DECLINED" ]; then
+      echo "  this body will resume $(printf '%s' "$RESUME_TARGET" | cut -c1-8)..., which is NOT the session you"
+      echo "  are running in. keeping the id already recorded, because someone set it deliberately."
+      echo "  (pass --pin to replace it with yours instead.)"
+    else
+      echo "  this body will resume $(printf '%s' "$RESUME_TARGET" | cut -c1-8)... (the id already recorded)."
+    fi
   elif [ "$RESUME" = "1" ]; then
     cat <<'WARN_EOF'
   ***  HEADS UP: this body will start a FRESH conversation, not carry this one.  ***
@@ -425,7 +603,7 @@ if [ "$IN_SESSION" -eq 1 ]; then
 waterbear: wired, and DELIBERATELY NOT STARTED YET.
 
   nothing has forked and nothing is lost. this window is still your only live
-  session, and its conversation is what the body will resume.
+  session. which conversation the body will resume is stated at the bottom.
 
   the body is not running yet on purpose: starting it now would leave you with TWO
   live sessions for one conversation, and the new one would look empty (it renders
@@ -460,6 +638,40 @@ if ! launchctl bootstrap "gui/${USER_ID}" "$PLIST" 2>/dev/null; then
 fi
 launchctl enable "gui/${USER_ID}/${LABEL}" 2>/dev/null || true
 
+# VERIFY, rather than assume. Both bootstrap and load are swallowed above (they fail
+# noisily for reasons that do not matter, like an already-loaded label), so a real
+# failure looked exactly like success and the script cheerfully printed "started"
+# over a body that never came up. A body that never starts is the quietest failure
+# this tool has: nothing errors, the plist exists, the logs are empty, and you only
+# find out when you go looking for an agent that was never there.
+STARTED=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if tmux has-session -t "$NAME" 2>/dev/null; then STARTED=1; break; fi
+  sleep 1
+done
+
+if [ "$STARTED" -eq 0 ]; then
+  cat >&2 <<FAILED_EOF
+waterbear: WIRED, BUT THE BODY DID NOT COME UP.
+
+  the LaunchAgent is installed and enabled, but no tmux session named "${NAME}" exists
+  after waiting 10s. launchd accepted the job and nothing started, which it does not
+  report as an error.
+
+  try, in order:
+    launchctl bootstrap gui/${USER_ID} ${PLIST}
+    tmux ls
+    cat /tmp/${LABEL}.err
+
+  the wiring is fine, so it will also come up on its own at next login. this is not
+  data loss, it is a body that is not running yet.
+FAILED_EOF
+  echo "  session name : ${NAME}"
+  echo "  id file      : ${SESSION_FILE}"
+  announce_target
+  exit 1
+fi
+
 echo "waterbear: installed + started."
 echo "  session name : ${NAME}"
 echo "  working dir  : ${WORKDIR}"
@@ -470,4 +682,22 @@ echo "  stop         : launchctl bootout gui/${USER_ID}/${LABEL}"
 echo
 announce_target
 echo
+# THE FOSSIL. A conversation BORN in the desktop app exists there as a native local
+# chat. The durable body's remote-control registration is a SECOND surface on the
+# same conversation: mobile dedupes them into one entry, the desktop shows both, and
+# the native chat is not a stale view, it is a live client that will answer if typed
+# into. Every desktop-origin conversion leaves one behind, structurally. The data is
+# never at risk (one transcript on disk either way), but two answering copies of one
+# agent is the singleton rule broken in the UI, so closing the native chat is a
+# REQUIRED step of a desktop-origin conversion, not a tip.
+if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && [ "${CLAUDE_CODE_ENTRYPOINT:-cli}" != "cli" ]; then
+  cat <<FOSSIL_EOF
+
+  *** REQUIRED, because this conversation was born in the desktop app: ***
+  the desktop still holds its NATIVE chat for this conversation, and that chat is a
+  live second copy of this agent, it will answer if typed into. archive it in the
+  desktop app once the body is up. archiving removes the surface, not the data: the
+  transcript on disk is the conversation, and the body carries all of it.
+FOSSIL_EOF
+fi
 echo "if a session was already running under that name, it was adopted (not restarted)."

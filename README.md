@@ -91,6 +91,23 @@ it. waterbear cannot drive a browser re-login, so this one stays a manual step. 
 subscription backbone. (The guard also has a crashloop net that notifies and backs off if a session
 genuinely dies in a loop, e.g. a bad resume id; an expired login does not trigger that.)
 
+## waterbear never moves your agent
+
+The promise is **identical, except now it cannot be killed**. The working directory is part of
+identical: an agent working in `~/code/foo` that comes back somewhere else is not the same agent,
+whatever its transcript says.
+
+This is mechanical, not philosophical. `claude --resume <id>` resolves a session **within the project
+directory it is launched from**. Point the body at a different directory and the id simply is not
+there, so the resume finds nothing and quietly starts a FRESH session instead. Nothing errors. You end
+up with your real conversation in one place and a brand-new empty agent in another, and the new one's
+capture hook overwrites the pointer to the real one within seconds.
+
+So the working directory defaults to **where you ran the installer**, and if you pin a conversation
+that does not live there, the install refuses and tells you where it actually lives. If you genuinely
+want a body elsewhere with a fresh start, that is a different thing and you say so: `--no-pin` with
+resume off.
+
 ## it carries THIS conversation, and it tells you so
 
 With `CLAUDE_RC_RESUME=1`, the installer pins the session you ran it from, so the durable body comes
@@ -102,35 +119,77 @@ succeeds, the body comes up FRESH, and you are left looking at two live sessions
 conversation, and a brand-new empty agent beside it. Nothing errored, so nothing told you the promise
 had quietly inverted. Now it does.
 
-## waterbear yourself: the handoff is two steps, on purpose
+## a waterbeared agent is a singleton
 
-The common case is an agent running this on ITSELF, from inside the conversation you want to make
-durable. That creates one ordering problem worth understanding, because the alternative is alarming.
+One conversation, one body, ever. The installer refuses to wire a conversation that already has a
+body under any name, and tells you where the existing one is. The one surface it cannot close for
+you: a conversation born in the desktop app keeps its native chat there, alongside the remote-control
+entry (mobile dedupes these, desktop shows both). That native chat is a live second copy, so the
+installer tells you to archive it, and that instruction is part of the conversion, not a suggestion.
+Archiving removes the surface, never the data.
 
-If the body started immediately, your caller's client would still be alive and registered, so you
-would briefly have **two live sessions holding one conversation**: the window you are looking at, and
-a new one that renders only the turns after the resume point and therefore looks EMPTY. It reads like
-the tool forked your agent and ate your history. It did not, but nobody debugs from there.
+## waterbear yourself: it just takes over
 
-So when the installer can see it is running inside a session, it wires everything and **stops**:
+Running the installer from inside a session starts the durable body immediately, and the body resumes
+that exact conversation: same id, one transcript, appended to. The window you were talking in is a
+view, and it catches up when remote control registers. Nothing forks and there is nothing to close.
 
-```
-1. finish up, then close or end the calling session
-2. waterbear start <name>      (or just log out and back in, launchd does it)
-3. tmux attach -t <name>       (also your phone / desktop app / claude.ai)
-```
-
-Step 1 is ordering, not etiquette: two clients on one conversation both append to the same transcript.
-
-This cannot be automated. The CLI does not hold its transcript open, so there is no handle to watch,
-and a desktop client is not attributable to a process worth polling, which means nothing can detect
-the caller letting go. `--now` skips the deferral if you would rather manage the overlap yourself.
+(`--defer` wires everything without starting, for anyone who wants to start the body themselves with
+`waterbear start <name>`. It exists because the ordering is observable; it is not the default because
+in practice everyone who met a deferred install read "done, now do these steps" as a failure.)
 
 **Resume really is resume.** It reattaches to the same session: same id, same single transcript file,
 appended to, with the full context available. (Verified: a session was created, exited, resumed by id,
 and recalled a fact from before the resume, while the transcript stayed one file that grew rather than
 a second file appearing.) So if a client ever shows you a shorter scrollback than you expected, that is
 a rendering question and not lost history, and the data on disk is whole.
+
+## Versioning and releases
+
+The version is **derived, not stored**: `major.minor` come from the latest git tag and the patch is the
+number of commits since it, so `v1.1` plus four commits publishes as `1.1.4`. Cutting a minor release
+is just `git tag v1.2 && git push --tags`, and every commit after it numbers itself.
+
+Every push to `main` publishes, via npm **trusted publishing** (OIDC): GitHub mints a short-lived
+identity token per run and npm verifies it against the publisher configured on the package. There is
+no `NPM_TOKEN` to store, leak, or rotate. Release CI computes the version, stamps it into
+`package.json` and `SKILL.md` in the build only, and publishes; nothing is committed back, because a
+commit from CI would itself move the number it just computed.
+
+The consequence worth knowing if you read the source: **a committed file cannot hold its own accurate
+version**, since the patch depends on the commit containing it. The repo carries the tag-level base
+(`1.1.0`), and the published artifact carries the computed one. If you want to know exactly what you
+have installed, ask npm or read the version in the package you installed, not the version in the repo.
+
+### A fresh start you fell back to is not a fresh start you asked for
+
+`CLAUDE_RC_WAKE` fires only when there was no conversation to resume. If you asked for resume and got
+this, something went wrong, and that is the worst possible moment to run an unconstrained
+identity-bootstrap prompt: a wake that says "self-locate, your home is X" will competently act on it in
+a session that was meant to be a continuation. That is how a body ends up correctly following
+instructions in the wrong place.
+
+So the guard now says it, in its log and in the session, and prepends a warning to the wake prompt
+itself telling the agent that a resume was intended and failed, that prior context does not exist, and
+not to relocate or reconfigure anything until the human confirms.
+
+## Changing the plist: kickstart does not reload it
+
+`launchctl kickstart -k` restarts the job from the spec launchd already has **in memory**. It does not
+re-read the file. So after editing a plist (a changed env var, a new doorbell path, a different working
+directory) a kickstart restarts the OLD configuration and everything looks like it worked: the job
+bounces, the process comes back, and none of your changes are in it.
+
+A rewritten plist needs a full reload:
+
+```sh
+launchctl bootout   gui/$(id -u)/com.<user>.claude-rc.<name>
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.<user>.claude-rc.<name>.plist
+```
+
+Re-running the installer does this for you. It is only worth knowing because the shortcut is the
+obvious thing to reach for, it reports success, and the failure is invisible until you go looking for
+an env var that never arrived.
 
 ## the first wake
 

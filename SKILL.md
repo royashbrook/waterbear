@@ -1,7 +1,7 @@
 ---
 name: waterbear
 description: Use when you want a Claude Code (or terminal AI) session to survive crashes, patches, quits, and reboots and come back on its own, when an agent is told to "waterbear yourself" / "make yourself always-on / unkillable / permanent", or when you want a respawn to RESUME the same conversation instead of starting blank. Most often an agent runs it on ITSELF to persist the current conversation. macOS/launchd reference implementation, adaptable to other OSes.
-version: 1.0.0
+version: 1.1.0
 ---
 
 # waterbear
@@ -30,11 +30,11 @@ consequences worth stating up front:
 - **macOS only** (launchd). the pattern ports to linux/systemd (see "Other operating systems"), but
   this installer is mac. it is tied to that machine and user, the LaunchAgent is per-user and
   durable only while you are logged in, and the body does not follow you to another machine.
-- **Claude Desktop app**: you CAN invoke this from a desktop session, but the durable body is a
-  CLI/tmux process, and it will NOT resume that desktop conversation, resume-by-id is a CLI feature
-  the desktop app does not expose. installing births a SEPARATE CLI body; you then drive it from the
-  desktop / phone / web via remote-control. (identity still survives if your wake prompt
-  reconstitutes the agent from durable state; only the in-flight desktop chat is what you'd lose.)
+- **Claude Desktop app**: works. desktop and CLI write the same on-disk transcripts, so the CLI body
+  CAN resume a desktop conversation by id, provided it launches in the conversation's own working
+  directory (the never-move guard enforces this). the desktop window becomes one more remote-control
+  view of the now-durable session. (an earlier version of this doc claimed desktop conversations
+  could not be resumed; that was wrong, and it was disproven by doing it.)
 - **cloud / Claude Code on web**: not applicable, there is no local machine, launchd, or tmux to
   keep alive. waterbear is for a session running on your own computer.
 - **auth expiry needs an interactive re-login**: the CLI runs on your subscription login (OAuth),
@@ -90,6 +90,66 @@ Then run the installer at `~/.claude/skills/waterbear/scripts/waterbear-install`
 Only ask the human if they want to override a default (a different directory, custom wake prompts).
 Otherwise just set yourself up and confirm.
 
+## Do not move the agent
+
+`CLAUDE_RC_DIR` is where the agent is **actually running right now**, and the default (your current
+directory) is almost always correct. Do not set it to where you feel the agent "belongs", or to a
+project home, or to a worktree you consider its base. Those are your ideas about the agent; the
+directory is a fact about it.
+
+The failure is silent and total: `claude --resume` only finds a session inside its own project
+directory, so a body pointed elsewhere starts a FRESH conversation, and the human is left with their
+real agent in one window and an empty impostor in another. The installer now refuses this, but the
+refusal is a net, not a plan. Just do not move the agent.
+
+## Waterbear yourself: the takeover is automatic, say only what is true
+
+Installing from inside your own session starts the durable body immediately, and the body resumes
+THIS conversation: same session id, same single transcript, appended to. The window the human is
+looking at is a VIEW of that conversation, and it catches up when remote control registers. Nothing
+forks, there is no second body, and there is nothing the human must close first.
+
+So after installing, tell the human three true things, and no homework:
+
+1. done: this conversation is now durable, it survives crashes, patches, quits, and reboots
+2. the window may blink or briefly show a stale view while remote control re-registers; the
+   conversation underneath is one transcript on disk and it is whole
+3. they can reach it from anywhere: their phone, the desktop app, or `tmux attach -t <name>`
+
+**One exception to "no homework", and it is required, not a tip.** If this conversation was BORN in
+the desktop app (the installer detects this and says so), the desktop keeps its NATIVE chat for the
+conversation alongside the new remote-control entry. That native chat is not a stale view: it is a
+live second copy of this agent and will answer if typed into. Mobile dedupes the two surfaces;
+desktop shows both. Tell the human to **archive the native desktop chat** as soon as the body
+confirms. Archiving removes the surface, never the data, the transcript on disk is the conversation
+and the body carries all of it.
+
+## The singleton rule
+
+A waterbeared agent is ONE agent. The installer enforces the half it can see: if a conversation
+already has a body (any name), a second install against it is refused with directions to the
+existing body. The half it cannot see is surfaces: a fossil desktop chat, an old window someone
+types into. Never wake an agent through an old surface and waterbear it again, that is how one
+agent becomes two. If you are unsure whether a conversation already has a body, `waterbear doctor`
+lists every pinned conversation on the machine.
+
+If the installer output says the body will start FRESH instead of resuming, STOP and fix that before
+saying anything else (see the pin section above). And `--defer` exists if a human explicitly wants to
+start the body themselves later; it is not the default because every operator who met the deferred
+handoff read a correct install as an incomplete one.
+
+## Do not move the agent
+
+`CLAUDE_RC_DIR` is where the agent is **actually running right now**, and the default (your current
+directory) is almost always correct. Do not set it to where you feel the agent "belongs", or to a
+project home, or to a worktree you consider its base. Those are your ideas about the agent; the
+directory is a fact about it.
+
+The failure is silent and total: `claude --resume` only finds a session inside its own project
+directory, so a body pointed elsewhere starts a FRESH conversation, and the human is left with their
+real agent in one window and an empty impostor in another. The installer now refuses this, but the
+refusal is a net, not a plan. Just do not move the agent.
+
 ## Waterbear yourself: you must hand off, and you must SAY SO
 
 When you run this on yourself, the installer wires the body and deliberately does NOT start it,
@@ -108,6 +168,24 @@ So your last act after installing is to TELL THE HUMAN, plainly, in your own wor
    memory.
 
 Do not leave any of this to convention. Convention is exactly what a first-time user does not have.
+
+## Changing the plist: kickstart does not reload it
+
+`launchctl kickstart -k` restarts the job from the spec launchd already has **in memory**. It does not
+re-read the file. So after editing a plist (a changed env var, a new doorbell path, a different working
+directory) a kickstart restarts the OLD configuration and everything looks like it worked: the job
+bounces, the process comes back, and none of your changes are in it.
+
+A rewritten plist needs a full reload:
+
+```sh
+launchctl bootout   gui/$(id -u)/com.<user>.claude-rc.<name>
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.<user>.claude-rc.<name>.plist
+```
+
+Re-running the installer does this for you. It is only worth knowing because the shortcut is the
+obvious thing to reach for, it reports success, and the failure is invisible until you go looking for
+an env var that never arrived.
 
 ## The first wake must be prompt-free
 
