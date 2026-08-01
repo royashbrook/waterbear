@@ -133,6 +133,13 @@ types into. Never wake an agent through an old surface and waterbear it again, t
 agent becomes two. If you are unsure whether a conversation already has a body, `waterbear doctor`
 lists every pinned conversation on the machine.
 
+**After converting a desktop-born agent, run `waterbear doctor --twins` and relay the card.** The
+transcript records where every entry came from, so doctor can tell a desktop-born conversation from a
+CLI-born one, and for each likely twin it prints the fingerprint a human needs to find the right chat
+in the desktop UI: birth date and opening message, which survive renames when titles do not. It also
+reports whether the fossil is still writing. Relay that card to the human verbatim, the fix is one
+archive click per twin and the card tells them which chat and why it is safe.
+
 If the installer output says the body will start FRESH instead of resuming, STOP and fix that before
 saying anything else (see the pin section above). And `--defer` exists if a human explicitly wants to
 start the body themselves later; it is not the default because every operator who met the deferred

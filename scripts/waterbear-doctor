@@ -20,7 +20,14 @@ PROJECTS="$HOME/.claude/projects"
 SMALL_KB="${WB_SMALL_KB:-64}"      # a transcript smaller than this is suspiciously fresh
 STALE_MIN="${WB_STALE_MIN:-1440}"  # untouched for longer than this is suspiciously cold
 
-names=("$@")
+TWINS=""
+names=()
+for a in "$@"; do
+  case "$a" in
+    --twins) TWINS=1 ;;
+    *) names+=("$a") ;;
+  esac
+done
 if [ "${#names[@]}" -eq 0 ]; then
   # every body we can see an id file for
   for f in "$HOME"/.claude/rc-session-*; do
@@ -67,6 +74,58 @@ for name in "${names[@]}"; do
 
   printf '%-14s %s…  %6s KB  touched %sm ago%s\n' "$name" "${sid:0:8}" "$kb" "$min" "$flag"
   [ -n "$flag" ] && rc=1
+  # THE TWIN CHECK. A conversation born in the desktop app leaves its native chat there
+  # after conversion, and that chat is a live second copy of the agent, not a stale
+  # view. Nothing on disk can close it, but the transcript can IDENTIFY it: every entry
+  # records its entrypoint, so a desktop-born conversation is detectable, and the first
+  # human message plus the birth date is the fingerprint a person needs to find the
+  # right chat in the desktop UI. That matters because names drift: an agent that
+  # renamed itself after conversion has a fossil under its OLD name, and "which of
+  # these chats is the twin" is exactly the question the fingerprint answers.
+  if [ -n "${TWINS:-}" ] && command -v python3 >/dev/null 2>&1; then
+    python3 - "$t" "$name" <<'TWIN_PY'
+import json, sys
+path, name = sys.argv[1], sys.argv[2]
+first_ep = first_ts = first_user = None
+desk_n = 0
+desk_last = None
+with open(path) as f:
+    for line in f:
+        try: d = json.loads(line)
+        except Exception: continue
+        ep = d.get('entrypoint')
+        if ep:
+            if first_ep is None: first_ep = ep
+            if ep != 'cli':
+                desk_n += 1
+                if d.get('timestamp'): desk_last = d['timestamp']
+        if first_ts is None and d.get('timestamp'): first_ts = d['timestamp']
+        if first_user is None and d.get('type') == 'user':
+            c = d.get('message', {}).get('content')
+            if isinstance(c, str): first_user = c
+            elif isinstance(c, list):
+                for part in c:
+                    if isinstance(part, dict) and part.get('type') == 'text':
+                        first_user = part['text']; break
+if first_ep == 'cli':
+    print(f"    origin: cli. no native desktop chat exists for this conversation, no twin possible.")
+else:
+    ex = (first_user or '(none)').replace('\n', ' ')[:70]
+    born = (first_ts or '?')[:10]
+    last = (desk_last or '?')[:16].replace('T', ' ')
+    print(f"    TWIN LIKELY: this conversation was born in the desktop app, so its native")
+    print(f"    chat is still there, a live second copy of this agent under whatever name")
+    print(f"    it had at the time (renames do not retitle desktop chats).")
+    print(f"      find it by content, not name. it is the chat that:")
+    print(f"        - started {born}")
+    print(f"        - begins: \"{ex}\"")
+    print(f"      desktop-side entries so far: {desk_n}, most recent {last}")
+    print(f"      fix: ARCHIVE that chat in the desktop app. this removes the surface,")
+    print(f"      never the data; the transcript on disk is the conversation and the")
+    print(f"      body carries all of it.")
+TWIN_PY
+  fi
+
 
   d="$HOME/.claude/rc-session-${name}.declined"
   if [ -f "$d" ]; then

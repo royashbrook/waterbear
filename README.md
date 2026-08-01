@@ -128,6 +128,11 @@ entry (mobile dedupes these, desktop shows both). That native chat is a live sec
 installer tells you to archive it, and that instruction is part of the conversion, not a suggestion.
 Archiving removes the surface, never the data.
 
+Already converted some agents and suspect leftovers? `waterbear doctor --twins` audits every body on
+the machine: it reads each conversation's transcript to tell desktop-born from CLI-born, and prints a
+fingerprint (birth date + opening message, which survive renames when titles do not) for each likely
+twin, plus whether that twin is still writing. One archive click per card.
+
 ## waterbear yourself: it just takes over
 
 Running the installer from inside a session starts the durable body immediately, and the body resumes
