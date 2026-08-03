@@ -520,13 +520,25 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
           break
         fi
         [ $(( line_len + 1 )) -le "$unread_len" ] || break   # no newline yet: partial write, wait
-        # empty-box check: match the composer marker line, normalize the non-breaking space
+        # empty-box check: match the composer marker line, normalize the non-breaking space.
+        # capture WITH escapes (-e): the client renders its ghost autocomplete suggestion as a
+        # FAINT span (SGR 2) after the marker, and a plain capture strips the styling that is
+        # the only thing distinguishing render-only ghost text from real queued input. a ghost
+        # can persist for hours, and without -e it starved every ring the whole time (#25).
+        # typing into a ghost is safe (send-keys lands in an actually-empty composer), but a
+        # typed PREFIX with a faint completion is real input and still defers, because only
+        # the faint span is dropped.
         pane_ok=0
-        pane_txt=$(tmux capture-pane -p -t "$NAME" 2>/dev/null || true)
+        pane_txt=$(tmux capture-pane -pe -t "$NAME" 2>/dev/null || true)
         if [ -n "$pane_txt" ]; then
           nbsp="$(printf '\302\240')"
-          if printf '%s\n' "$pane_txt" | awk -v nb="$nbsp" '
+          esc="$(printf '\033')"
+          if printf '%s\n' "$pane_txt" | awk -v nb="$nbsp" -v esc="$esc" '
               { gsub(nb, " ") }
+              # a faint span (2 anywhere in the SGR params) and the text it styles: ghost, drop
+              { gsub(esc "\\[([0-9]+;)*2(;[0-9]+)*m[^" esc "]*", "") }
+              # every remaining escape sequence: styling, not content
+              { gsub(esc "\\[[0-9;]*[A-Za-z]", "") }
               /^[[:space:]]*(>|❯)([[:space:]]|$)/ { l = $0; f = 1 }
               END {
                 if (!f) exit 1

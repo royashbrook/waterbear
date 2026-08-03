@@ -80,6 +80,11 @@ capture() { tmux capture-pane -p -t "$TARGET"; }
 # NOTE: an empty box renders as the marker followed by a NON-BREAKING space (U+00A0),
 # not an ASCII one, so [[:space:]] misses it and every box reads as occupied. Normalize
 # nbsp to a plain space before looking at anything.
+# NOTE 2: this one capture keeps escapes (-e), because the client's ghost autocomplete
+# renders a suggestion in a FAINT span (SGR 2) after the marker. Ghost text is
+# render-only, not buffered input, so it must read as clean, and the faint styling is
+# the only thing distinguishing it from queued text (#25). A typed prefix with a faint
+# completion still reads dirty, only the faint span is dropped.
 # A modal, detected POSITIVELY by its own footer rather than inferred from the absence
 # of an input line. Needed because the marker glyph is overloaded: the composer prompt
 # and a modal's selected row both render as "❯", so parsing for the marker alone reads
@@ -92,9 +97,13 @@ modal_open() {
 
 input_state() {
   if modal_open; then return 2; fi
-  local nbsp; nbsp="$(printf '\302\240')"
-  capture | awk -v nb="$nbsp" '
+  local nbsp esc; nbsp="$(printf '\302\240')"; esc="$(printf '\033')"
+  tmux capture-pane -pe -t "$TARGET" | awk -v nb="$nbsp" -v esc="$esc" '
     { gsub(nb, " ") }
+    # a faint span (2 anywhere in the SGR params) and the text it styles: ghost, drop
+    { gsub(esc "\\[([0-9]+;)*2(;[0-9]+)*m[^" esc "]*", "") }
+    # every remaining escape sequence: styling, not content
+    { gsub(esc "\\[[0-9;]*[A-Za-z]", "") }
     # skip list rows ("❯ 1. Bash"), which share the composer marker
     /^[[:space:]]*(>|❯)[[:space:]]+[0-9]+\./ { next }
     /^[[:space:]]*(>|❯)([[:space:]]|$)/ { line = $0; found = 1 }
