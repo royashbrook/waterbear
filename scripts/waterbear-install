@@ -467,11 +467,31 @@ fi
 # doorbell (optional): the GUARD, not the session, watches the signal file. so it survives a
 # client patch that would kill a session-owned watcher, and the session burns ZERO tokens sitting
 # on a tail. on a new line it send-keys a wake into the live session. this is the "watch in the
-# durable layer, only touch the session on a real event" model. start at EOF so old rings are not
-# replayed. (idle-detection before the send-keys is a known TODO: a ring mid-generation queues.)
+# durable layer, only touch the session on a real event" model.
+# (idle-detection before the send-keys is a known TODO: a ring mid-generation queues.)
+#
+# the offset PERSISTS in a sibling file (#26): a restart resumes where the last guard stopped,
+# so rings that were still deferred (busy composer, a ghost) or that arrived while the guard
+# was down are delivered, not silently skipped. EOF-init happens only when no offset file
+# exists yet (first wire-up: old rings are not replayed). an offset larger than the file means
+# the file was truncated while the guard was down: reset to 0, same as the live truncation
+# rule below. a corrupt offset file reads as absent. at-least-once holds either way: a crash
+# between the send and the offset write re-delivers, never drops.
 db_off=0
-if [ -n "$DOORBELL" ] && [ -f "$DOORBELL" ]; then
-  db_off=$(wc -c < "$DOORBELL" 2>/dev/null | tr -d ' ' || echo 0)
+if [ -n "$DOORBELL" ]; then
+  OFF_FILE="$DOORBELL.offset"
+  if [ -f "$DOORBELL" ]; then
+    sz=$(wc -c < "$DOORBELL" 2>/dev/null | tr -d ' ' || echo 0)
+    # 2>/dev/null BEFORE the input redirect: redirections apply left to right, and a
+    # missing offset file must fail silently, not log noise on every first start
+    off=$(tr -dc '0-9' 2>/dev/null < "$OFF_FILE" || true)
+    if [ -n "$off" ]; then
+      if [ "$off" -le "$sz" ]; then db_off=$off; else db_off=0; fi
+    else
+      db_off=$sz
+    fi
+    printf '%s' "$db_off" > "$OFF_FILE" 2>/dev/null || true
+  fi
 fi
 net_state=up; down_since=0; last_tick=$(date +%s); last_probe=0
 while tmux has-session -t "$NAME" 2>/dev/null; do
@@ -487,7 +507,9 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
   if [ -n "$DOORBELL" ] && [ -f "$DOORBELL" ]; then
     cur=$(wc -c < "$DOORBELL" 2>/dev/null | tr -d ' ' || echo 0)
     cur=${cur:-0}; db_off=${db_off:-0}
-    if [ "$cur" -lt "$db_off" ]; then db_off=0; fi          # file truncated / rotated: reset
+    if [ "$cur" -lt "$db_off" ]; then                       # file truncated / rotated: reset
+      db_off=0; printf '%s' "$db_off" > "$OFF_FILE" 2>/dev/null || true
+    fi
     if [ "$cur" -gt "$db_off" ]; then
       # DELIVERY CONTRACT (at-least-once, one send per ring line):
       #   1. the offset advances ONLY after a send that reported success. the old order (advance,
@@ -516,7 +538,11 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
           # a BLANK line (stray echo, manual touch). it has no content to deliver, but it
           # must still be CONSUMED: "break" here would compare this same empty line to the
           # composer forever and the doorbell would never advance past it. jam, not wait.
-          if [ "$unread_len" -ge 1 ]; then db_off=$(( db_off + 1 )); continue; fi
+          if [ "$unread_len" -ge 1 ]; then
+            db_off=$(( db_off + 1 ))
+            printf '%s' "$db_off" > "$OFF_FILE" 2>/dev/null || true
+            continue
+          fi
           break
         fi
         [ $(( line_len + 1 )) -le "$unread_len" ] || break   # no newline yet: partial write, wait
@@ -554,6 +580,7 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
           sleep 1
           tmux send-keys -t "$NAME" Enter 2>/dev/null || true
           db_off=$(( db_off + line_len + 1 ))               # consume ONLY after a successful send
+          printf '%s' "$db_off" > "$OFF_FILE" 2>/dev/null || true
           sleep 1
         else
           break                                              # send failed: offset untouched, retry
