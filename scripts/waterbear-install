@@ -103,7 +103,7 @@ done
 # slot instead. A deliberately passed value either lives in the session env or
 # differs from the global one, and still wins.
 if [ -n "${TMUX:-}" ]; then
-  for _v in CLAUDE_RC_NAME CLAUDE_RC_TITLE CLAUDE_RC_DIR CLAUDE_RC_WAKE CLAUDE_RC_RESUME CLAUDE_RC_RESUME_WAKE CLAUDE_RC_DOORBELL; do
+  for _v in CLAUDE_RC_NAME CLAUDE_RC_TITLE CLAUDE_RC_DIR CLAUDE_RC_WAKE CLAUDE_RC_RESUME CLAUDE_RC_RESUME_WAKE CLAUDE_RC_DOORBELL CLAUDE_RC_SESSION_FILE; do
     eval "_val=\${$_v:-}"
     [ -n "$_val" ] || continue
     tmux show-environment "$_v" >/dev/null 2>&1 && continue
@@ -153,8 +153,9 @@ if [ -f "$PLIST" ]; then
   # wherever the repair happened to be run from.
   if [ -z "${CLAUDE_RC_DIR:-}" ]; then v="$(inherit CLAUDE_RC_DIR)"; [ -n "$v" ] && WORKDIR="$v"; fi
   if [ -z "${CLAUDE_RC_RESUME:-}" ]; then v="$(inherit CLAUDE_RC_RESUME)"; [ -n "$v" ] && RESUME="$v"; fi
+  if [ -z "${CLAUDE_RC_SESSION_FILE:-}" ]; then v="$(inherit CLAUDE_RC_SESSION_FILE)"; [ -n "$v" ] && SF_INHERIT="$v"; fi
 fi
-SESSION_FILE="${CLAUDE_RC_SESSION_FILE:-$HOME/.claude/rc-session-$NAME}"
+SESSION_FILE="${CLAUDE_RC_SESSION_FILE:-${SF_INHERIT:-$HOME/.claude/rc-session-$NAME}}"
 
 # --- --print-config: say what this install WOULD use, then stop before any write ----------------
 # The resolution above (explicit env > ambient-strip > own-plist inherit > default)
@@ -490,6 +491,7 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
       -e "CLAUDE_RC_NAME=$NAME" -e "CLAUDE_RC_TITLE=$TITLE" -e "CLAUDE_RC_DIR=$WORKDIR" \
       -e "CLAUDE_RC_WAKE=$WAKE" -e "CLAUDE_RC_RESUME=$RESUME" -e "CLAUDE_RC_RESUME_WAKE=$RESUME_WAKE" \
       -e "CLAUDE_RC_DOORBELL=$DOORBELL" \
+      -e "CLAUDE_RC_SESSION_FILE=$SESSION_FILE" \
       -c "$WORKDIR" "claude --remote-control \"$TITLE\" --resume $SID"
     NUDGE="$RESUME_WAKE"
   else
@@ -514,6 +516,7 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
       -e "CLAUDE_RC_NAME=$NAME" -e "CLAUDE_RC_TITLE=$TITLE" -e "CLAUDE_RC_DIR=$WORKDIR" \
       -e "CLAUDE_RC_WAKE=$WAKE" -e "CLAUDE_RC_RESUME=$RESUME" -e "CLAUDE_RC_RESUME_WAKE=$RESUME_WAKE" \
       -e "CLAUDE_RC_DOORBELL=$DOORBELL" \
+      -e "CLAUDE_RC_SESSION_FILE=$SESSION_FILE" \
       -c "$WORKDIR" "claude --remote-control \"$TITLE\""
     NUDGE="$WAKE"
     if [ "$RESUME" = "1" ]; then
