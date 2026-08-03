@@ -81,7 +81,9 @@ for name in "${names[@]}"; do
     echo "      stub (move it out of ~/.claude/projects, do not delete it)."
     rc=1
     # prefer the largest as the one to report on
-    t="$(printf '%s\n' "$matches" | while IFS= read -r m; do printf '%s %s\n' "$(wc -c < "$m")" "$m"; done | sort -rn | head -1 | cut -d' ' -f2-)"
+    # wc -c pads with leading spaces on macOS; unstripped, the size glues onto the
+    # path after cut and the "largest" file becomes a name that doesn't exist.
+    t="$(printf '%s\n' "$matches" | while IFS= read -r m; do printf '%s %s\n' "$(wc -c < "$m" | tr -d ' ')" "$m"; done | sort -rn | head -1 | cut -d' ' -f2-)"
   fi
 
   kb=$(( $(wc -c < "$t") / 1024 ))
