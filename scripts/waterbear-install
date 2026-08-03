@@ -49,6 +49,72 @@
 # fresh start on the next respawn (the guard consumes the id file so it can't crashloop on it).
 set -euo pipefail
 
+# --- ARGS: validate before ANY side effect ------------------------------------------------------
+#
+# `waterbear-install --help` used to run a FULL INSTALL. Flags were substring-matched
+# out of "$*" deep in the script and anything unrecognized was silently ignored, so
+# the one command every stranger types to learn what a tool does executed its most
+# invasive path instead. Unknown arguments refuse loudly here; the known flags are
+# still consumed where they apply, this block only gates.
+usage() {
+  cat <<'USAGE_EOF'
+waterbear-install , keep a `claude --remote-control` session alive on macOS.
+
+usage: waterbear-install [flags]     (configuration is via CLAUDE_RC_* env vars)
+
+flags:
+  --help, -h      this text, and nothing else runs
+  --no-pin        do not write this session's id as the resume target (installing
+                  on another agent's behalf whose id is already pre-seeded)
+  --pin           force-pin this session's id even when the slot holds another
+  --no-chain      do not follow a compacted conversation to its newest tip
+  --defer         install only; do not start (or restart) the body now
+  --print-config  print the resolved configuration and exit before any write
+
+env (see the header of this script or the README for the full story):
+  CLAUDE_RC_NAME CLAUDE_RC_TITLE CLAUDE_RC_DIR CLAUDE_RC_WAKE
+  CLAUDE_RC_RESUME CLAUDE_RC_RESUME_WAKE CLAUDE_RC_DOORBELL
+
+https://github.com/royashbrook/waterbear
+USAGE_EOF
+}
+for _arg in "$@"; do
+  case "$_arg" in
+    --help|-h) usage; exit 0 ;;
+    --no-pin|--pin|--no-chain|--defer|--print-config) ;;
+    *) printf 'waterbear-install: unknown argument: %s (try --help)\n' "$_arg" >&2; exit 2 ;;
+  esac
+done
+
+# --- DISTRUST AMBIENT tmux ENV (the identity-leak class) ----------------------------------------
+#
+# All bodies share one tmux server, and the FIRST guard to boot seeds the server's
+# GLOBAL environment with its own seat's CLAUDE_RC_* values. Every session created on
+# that server afterwards hands those to its panes, so an agent can carry ANOTHER
+# session's TITLE, WAKE, and DIR in its environment while every visible surface looks
+# healthy. Running this installer from such a pane wrote the other identity into THIS
+# body's plist, invisible under RESUME=1 (a normal restart resumes and never reads the
+# wake line) until the one cold start that introduces the body as somebody else.
+#
+# The signature of the leak is precise: the value is NOT in the tmux SESSION
+# environment (nobody injected it for this session, nobody exported it here) and it
+# MATCHES the server-global value. That is ambient, not an instruction, and it is
+# ignored; the body's own plist (the inherit block below) or the defaults fill the
+# slot instead. A deliberately passed value either lives in the session env or
+# differs from the global one, and still wins.
+if [ -n "${TMUX:-}" ]; then
+  for _v in CLAUDE_RC_NAME CLAUDE_RC_TITLE CLAUDE_RC_DIR CLAUDE_RC_WAKE CLAUDE_RC_RESUME CLAUDE_RC_RESUME_WAKE CLAUDE_RC_DOORBELL; do
+    eval "_val=\${$_v:-}"
+    [ -n "$_val" ] || continue
+    tmux show-environment "$_v" >/dev/null 2>&1 && continue
+    _gval="$(tmux show-environment -g "$_v" 2>/dev/null || true)"; _gval="${_gval#*=}"
+    if [ "$_val" = "$_gval" ]; then
+      echo "waterbear: ignoring ambient $_v from the tmux server's global environment (another session's leak, not a choice you made)" >&2
+      unset "$_v"
+    fi
+  done
+fi
+
 NAME="${CLAUDE_RC_NAME:-claude}"
 TITLE="${CLAUDE_RC_TITLE:-$NAME}"
 WORKDIR="${CLAUDE_RC_DIR:-$PWD}"
@@ -81,8 +147,24 @@ if [ -f "$PLIST" ]; then
   if [ -z "${CLAUDE_RC_WAKE:-}" ]; then v="$(inherit CLAUDE_RC_WAKE)"; [ -n "$v" ] && WAKE="$v"; fi
   if [ -z "${CLAUDE_RC_RESUME_WAKE:-}" ]; then v="$(inherit CLAUDE_RC_RESUME_WAKE)"; [ -n "$v" ] && RESUME_WAKE="$v"; fi
   if [ -z "${CLAUDE_RC_DOORBELL:-}" ]; then v="$(inherit CLAUDE_RC_DOORBELL)"; [ -n "$v" ] && DOORBELL="$v"; fi
+  # DIR and RESUME too: the ambient leak above was silently supplying both on every
+  # self-repair, so the original inherit list never saw them missing. Without RESUME
+  # a repaired always-on body would come back FRESH; without DIR it would come back
+  # wherever the repair happened to be run from.
+  if [ -z "${CLAUDE_RC_DIR:-}" ]; then v="$(inherit CLAUDE_RC_DIR)"; [ -n "$v" ] && WORKDIR="$v"; fi
+  if [ -z "${CLAUDE_RC_RESUME:-}" ]; then v="$(inherit CLAUDE_RC_RESUME)"; [ -n "$v" ] && RESUME="$v"; fi
 fi
 SESSION_FILE="${CLAUDE_RC_SESSION_FILE:-$HOME/.claude/rc-session-$NAME}"
+
+# --- --print-config: say what this install WOULD use, then stop before any write ----------------
+# The resolution above (explicit env > ambient-strip > own-plist inherit > default)
+# has real logic in it; this is its observable check, doctor-style. Nothing below the
+# exit has run: no pin, no plist, no guard, no session.
+case " $* " in *" --print-config "*)
+  printf 'NAME=%s\nTITLE=%s\nWORKDIR=%s\nWAKE=%s\nRESUME=%s\nRESUME_WAKE=%s\nDOORBELL=%s\nSESSION_FILE=%s\n' \
+    "$NAME" "$TITLE" "$WORKDIR" "$WAKE" "$RESUME" "$RESUME_WAKE" "$DOORBELL" "$SESSION_FILE"
+  exit 0 ;;
+esac
 # --- PIN THE CALLER'S CONVERSATION (the whole promise of "waterbear yourself") ---
 #
 # The headline use case is an agent running this on ITSELF to persist the conversation
@@ -388,19 +470,27 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
   if [ "$RESUME" = "1" ] && [ -s "$SESSION_FILE" ]; then
     SID="$(head -n1 "$SESSION_FILE" | tr -d '[:space:]')"
   fi
-  # -e "CLAUDE_RC_NAME=$NAME" is LOAD-BEARING when more than one waterbear body runs on the same
-  # machine. they share one tmux server; the FIRST body to boot seeds the server's global
-  # environment with its own CLAUDE_RC_NAME, and every later `new-session` inherits it, so all
-  # panes would otherwise see the first body's name. the SessionStart capture hook keys the
-  # resume-id file on CLAUDE_RC_NAME, so without this every body writes rc-session-<first>, the
-  # others' files never update, and the next boot resumes crossed ids (body B comes up as body A).
-  # setting it per-session overrides the poisoned server env. (single-body users never hit this.)
+  # the -e list is LOAD-BEARING when more than one waterbear body runs on the same machine.
+  # they share one tmux server; the FIRST body to boot seeds the server's global environment
+  # with its own CLAUDE_RC_* values, and every later `new-session` inherits them, so all panes
+  # would otherwise see the first body's identity. NAME alone was injected originally (the
+  # capture hook keys the resume-id file on it; without it every body writes rc-session-<first>
+  # and the next boot resumes crossed ids). that left TITLE, WAKE, DIR and the rest ambient:
+  # a body wore another seat's identity in env while looking healthy, and re-running the
+  # installer from inside it wrote that identity into the body's own plist. so: EVERY identity
+  # var is set per-session now, making the pane env the seat's own by construction. the
+  # installer additionally refuses ambient values on its own (the strip at its top), so old
+  # sessions launched before this fix cannot poison a plist either.
   if [ -n "$SID" ]; then
     # consume the id first: if this resume is what's crashing, the next respawn finds no id
     # and falls back to a fresh start instead of looping on a bad resume. a SUCCESSFUL resume
     # re-runs SessionStart, and the capture hook rewrites the id file with the live session.
     mv -f "$SESSION_FILE" "$SESSION_FILE.consumed" 2>/dev/null || true
-    tmux new-session -d -s "$NAME" -e "CLAUDE_RC_NAME=$NAME" -c "$WORKDIR" "claude --remote-control \"$TITLE\" --resume $SID"
+    tmux new-session -d -s "$NAME" \
+      -e "CLAUDE_RC_NAME=$NAME" -e "CLAUDE_RC_TITLE=$TITLE" -e "CLAUDE_RC_DIR=$WORKDIR" \
+      -e "CLAUDE_RC_WAKE=$WAKE" -e "CLAUDE_RC_RESUME=$RESUME" -e "CLAUDE_RC_RESUME_WAKE=$RESUME_WAKE" \
+      -e "CLAUDE_RC_DOORBELL=$DOORBELL" \
+      -c "$WORKDIR" "claude --remote-control \"$TITLE\" --resume $SID"
     NUDGE="$RESUME_WAKE"
   else
     # A fresh start that was ASKED FOR is normal. A fresh start we FELL BACK to is an
@@ -420,7 +510,11 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
       echo "waterbear: this is a FRESH conversation, not the one you meant to continue." >&2
       echo "waterbear: check ${SESSION_FILE} and ${SESSION_FILE}.consumed" >&2
     fi
-    tmux new-session -d -s "$NAME" -e "CLAUDE_RC_NAME=$NAME" -c "$WORKDIR" "claude --remote-control \"$TITLE\""
+    tmux new-session -d -s "$NAME" \
+      -e "CLAUDE_RC_NAME=$NAME" -e "CLAUDE_RC_TITLE=$TITLE" -e "CLAUDE_RC_DIR=$WORKDIR" \
+      -e "CLAUDE_RC_WAKE=$WAKE" -e "CLAUDE_RC_RESUME=$RESUME" -e "CLAUDE_RC_RESUME_WAKE=$RESUME_WAKE" \
+      -e "CLAUDE_RC_DOORBELL=$DOORBELL" \
+      -c "$WORKDIR" "claude --remote-control \"$TITLE\""
     NUDGE="$WAKE"
     if [ "$RESUME" = "1" ]; then
       # prepend the warning to whatever bootstrap was configured, so the agent knows

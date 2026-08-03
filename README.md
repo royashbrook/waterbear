@@ -263,6 +263,28 @@ start on the next respawn.
 | `CLAUDE_RC_NET_CHECK_SECS` | how often to probe connectivity in the watch loop (default `30`) |
 | `CLAUDE_RC_OUTAGE_RESPAWN_SECS` | an outage longer than this, once internet recovers, triggers a respawn (default `600`; set `0` to respawn on any connectivity blip) |
 
+### flags
+
+Configuration is env vars; the flags only change what one run does. `--help`/`-h` prints usage and
+nothing runs. Unknown arguments refuse loudly instead of silently installing — `--help` used to
+execute a full install, which is the wrong surprise to give the one command every stranger types
+first. The others: `--no-pin` / `--pin` (see the pinning sections above), `--no-chain` (do not
+follow a compacted conversation to its tip), `--defer` (wire everything, start nothing), and
+`--print-config`, which prints the fully resolved configuration and exits before any write.
+
+### where a value actually comes from
+
+Explicit env wins, then the body's own plist (a re-run is the repair path, and the repairer's
+environment rarely carries everything the original install set), then the defaults. One wrinkle
+when several bodies share a machine: they share one tmux server, whose **global** environment is
+seeded by whichever body booted first, and every later session hands those values to its panes. An
+env value that was never set for *this* session and that matches that server-global value is
+another session's identity leaking in, not a choice you made — the installer says so and ignores
+it, and the guard now injects every `CLAUDE_RC_*` var per-session so new bodies never see the leak
+at all. Without this, re-running the installer from inside a leaked-into session wrote another
+session's title, wake prompt, and directory into this body's plist. `--print-config` shows the
+outcome of the whole resolution without touching anything.
+
 ## network recovery
 
 Remote control registers when the process starts and rides a persistent connection. A **sustained**
