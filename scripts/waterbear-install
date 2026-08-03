@@ -73,7 +73,10 @@ PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 # repaired body went deaf to its signal file while reporting a clean install.
 # Explicitly passed values always win; this only fills what is unset.
 if [ -f "$PLIST" ]; then
-  inherit() { sed -n "s|.*<key>$1</key>[[:space:]]*<string>\(.*\)</string>.*|\1|p" "$PLIST" | head -1; }
+  # plutil, not sed: launchd plists put <key> and <string> on SEPARATE lines, so a
+  # same-line pattern matches nothing and the whole block silently no-ops (the first
+  # cut of this shipped that way and inherited nothing).
+  inherit() { plutil -extract "EnvironmentVariables.$1" raw "$PLIST" 2>/dev/null || true; }
   if [ -z "${CLAUDE_RC_TITLE:-}" ]; then v="$(inherit CLAUDE_RC_TITLE)"; [ -n "$v" ] && TITLE="$v"; fi
   if [ -z "${CLAUDE_RC_WAKE:-}" ]; then v="$(inherit CLAUDE_RC_WAKE)"; [ -n "$v" ] && WAKE="$v"; fi
   if [ -z "${CLAUDE_RC_RESUME_WAKE:-}" ]; then v="$(inherit CLAUDE_RC_RESUME_WAKE)"; [ -n "$v" ] && RESUME_WAKE="$v"; fi

@@ -59,6 +59,16 @@ LABEL="com.${USER_NAME}.claude-rc.${NAME}"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 IDFILE="${CLAUDE_RC_SESSION_FILE:-$HOME/.claude/rc-session-${NAME}}"
 
+# the doorbell OFFSET sidecar (<doorbell>.offset, #26) is waterbear's artifact; the signal
+# file itself is the user's and is never touched. read the doorbell path now, before the
+# plist (its only record) is removed. kept on plain remove so a reinstall resumes the
+# delivery position; discarded with --forget along with the rest of waterbear's memory.
+DB_OFF=""
+if [ -f "$PLIST" ]; then
+  db="$(plutil -extract EnvironmentVariables.CLAUDE_RC_DOORBELL raw "$PLIST" 2>/dev/null || true)"
+  [ -n "$db" ] && DB_OFF="${db}.offset"
+fi
+
 run() {
   if [ "$DRY" -eq 1 ]; then printf 'would: %s\n' "$*"; else eval "$@"; fi
 }
@@ -125,6 +135,10 @@ if [ "$MODE" = "forget" ]; then
     echo "  that conversation's transcript is still on disk, but nothing names it any more."
   else
     echo "  no resume pointer to forget ($IDFILE)"
+  fi
+  if [ -n "$DB_OFF" ] && [ -f "$DB_OFF" ]; then
+    run "rm -f '$DB_OFF'"
+    echo "  removed the doorbell offset sidecar ($DB_OFF). the signal file was not touched."
   fi
 else
   if [ -f "$IDFILE" ]; then
