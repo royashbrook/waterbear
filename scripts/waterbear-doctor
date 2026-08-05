@@ -96,8 +96,8 @@ for name in "${names[@]}"; do
   printf '%-14s %s…  %6s KB  touched %sm ago%s\n' "$name" "${sid:0:8}" "$kb" "$min" "$flag"
   [ -n "$flag" ] && rc=1
   # THE TWIN CHECK. A conversation born in the desktop app leaves its native chat there
-  # after conversion, and that chat is a live second copy of the agent, not a stale
-  # view. Nothing on disk can close it, but the transcript can IDENTIFY it: every entry
+  # after conversion. The durable handoff retires that surface; nothing on disk can
+  # close it, but the transcript can IDENTIFY it: every entry
   # records its entrypoint, so a desktop-born conversation is detectable, and the first
   # human message plus the birth date is the fingerprint a person needs to find the
   # right chat in the desktop UI. That matters because names drift: an agent that
@@ -134,16 +134,16 @@ else:
     ex = (first_user or '(none)').replace('\n', ' ')[:70]
     born = (first_ts or '?')[:10]
     last = (desk_last or '?')[:16].replace('T', ' ')
-    print(f"    TWIN LIKELY: this conversation was born in the desktop app, so its native")
-    print(f"    chat is still there, a live second copy of this agent under whatever name")
-    print(f"    it had at the time (renames do not retitle desktop chats).")
+    print(f"    RETIRED SURFACE LIKELY: this conversation was born in the desktop app,")
+    print(f"    so its native chat is still there under whatever name it had at the time")
+    print(f"    (renames do not retitle desktop chats).")
     print(f"      find it by content, not name. it is the chat that:")
     print(f"        - started {born}")
     print(f"        - begins: \"{ex}\"")
     print(f"      desktop-side entries so far: {desk_n}, most recent {last}")
-    print(f"      fix: ARCHIVE that chat in the desktop app. this removes the surface,")
-    print(f"      never the data; the transcript on disk is the conversation and the")
-    print(f"      body carries all of it.")
+    print(f"      action: continue at the durable '{name}' entry, not this retired chat.")
+    print(f"      leave it alone, or archive it as optional cosmetics; the transcript")
+    print(f"      stays on disk and the body carries all of it.")
 TWIN_PY
   fi
 

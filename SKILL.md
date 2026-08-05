@@ -1,26 +1,20 @@
 ---
 name: waterbear
-description: Use when you want a Claude Code (or terminal AI) session to survive crashes, patches, quits, and reboots and come back on its own, when an agent is told to "waterbear yourself" / "make yourself always-on / unkillable / permanent", or when you want a respawn to RESUME the same conversation instead of starting blank. Most often an agent runs it on ITSELF to persist the current conversation. macOS/launchd reference implementation, adaptable to other OSes.
-version: 1.1.0
+description: Keep a local terminal AI session alive through crashes, patches, quits, and reboots, and resume the exact conversation when it returns. Use when an agent is told to "waterbear yourself", become always-on or persistent, recover a durable body, diagnose its reachability, or port that capability to another agent host or operating system. Defines a cross-substrate behavior contract and ships a Claude Code + macOS adapter.
 ---
 
 # waterbear
 
 ## Overview
 
-Keep a `claude --remote-control` session alive indefinitely. Named for the tardigrade, the
-animal that suspends its life under stress and revives when conditions return. A crash, a patch, a
-quit, or a reboot kills the process; waterbear brings it back on its own, and (optionally) resumes
-the exact prior conversation from disk so the agent returns as itself, mid-thought.
+Keep one local terminal agent body alive and resume its exact conversation after process or machine
+failure. Named for the tardigrade, which suspends its life under stress and revives when conditions
+return.
 
-## When to use
-
-- you want a session that survives crash / patch / quit / reboot and restarts itself
-- you want it reachable from phone / desktop / claude.ai the whole time (remote-control)
-- you want a respawn to RESUME the prior conversation, not a fresh blank one
-- someone says "make this agent always-on / persistent / unkillable / permanent"
-
-Not for: a one-off task, or a session you WANT to end when you close the terminal.
+Waterbear is a behavior contract with host adapters. Read
+[`references/adapters.md`](references/adapters.md) before installing or porting it. Run the bundled
+runtime scripts only for a **shipped** matrix row. The current scripts implement Claude Code on
+macOS; another host is not supported merely because it has a terminal.
 
 ## Where this runs (read first, it's local to one machine)
 
@@ -38,13 +32,12 @@ consequences worth stating up front:
 - **cloud / Claude Code on web**: not applicable, there is no local machine, launchd, or tmux to
   keep alive. waterbear is for a session running on your own computer.
 - **auth expiry needs an interactive re-login**: the CLI runs on your subscription login (OAuth),
-  which expires periodically. when it does, the session STAYS ALIVE and shows an auth error on each
-  request, so it announces itself (you see it via remote-control on your phone or desktop), it does
-  NOT silently die. run `claude` + `/login` at the machine to clear it. waterbear can't self-heal
-  this (launchd cannot drive a browser auth), and it's expected with a subscription backbone, not a
-  bug (API-key auth would avoid it but flips billing to metered). Separately, the guard has a
-  crashloop net (notify + back off) for a session that genuinely dies and respawns in a loop, e.g. a
-  bad resume id or corrupt state; an expired login does not trigger it.
+  which expires periodically. The tmux body can remain alive while remote control is unavailable,
+  so phone and desktop views may provide no useful signal. Inspect the tmux pane, complete
+  `claude` + `/login` at the machine, then restart the body so remote control registers again.
+  Waterbear cannot self-heal browser authentication, and doctor does not yet prove auth or remote
+  reachability. Separately, the guard has a crashloop net (notify + back off) for a session that
+  genuinely exits repeatedly; an expired login may not trigger it.
 
 If you do not want an always-on process tied to your mac, do not install it.
 
@@ -86,9 +79,9 @@ Then run the installer at `~/.claude/skills/waterbear/scripts/waterbear-install`
    monitor/watcher) and `CLAUDE_RC_WAKE="<identity bootstrap>"` (used only if there is ever no
    conversation to resume).
 5. Enter the durable body. It lives in tmux under launchd. **Already inside a tmux session named
-   `<name>`?** you are durable now, nothing else to do. **Not in tmux?** installing starts your
-   durable tmux body, end this session so the two don't run in parallel, and you continue in the
-   tmux body resuming this exact conversation.
+   `<name>`?** you are durable now, nothing else to do. **Not in tmux?** installing starts the
+   durable body and registers its remote-control entry. The current CLI window remains a view of the
+   same transcript; do not invent a close-and-restart handoff.
 
 Only ask the human if they want to override a default (a different directory, custom wake prompts).
 Otherwise just set yourself up and confirm.
@@ -119,13 +112,10 @@ So after installing, tell the human three true things, and no homework:
    conversation underneath is one transcript on disk and it is whole
 3. they can reach it from anywhere: their phone, the desktop app, or `tmux attach -t <name>`
 
-**One exception to "no homework", and it is required, not a tip.** If this conversation was BORN in
-the desktop app (the installer detects this and says so), the desktop keeps its NATIVE chat for the
-conversation alongside the new remote-control entry. That native chat is not a stale view: it is a
-live second copy of this agent and will answer if typed into. Mobile dedupes the two surfaces;
-desktop shows both. Tell the human to **archive the native desktop chat** as soon as the body
-confirms. Archiving removes the surface, never the data, the transcript on disk is the conversation
-and the body carries all of it.
+**Desktop-born exception:** the desktop keeps its native chat beside the new remote-control entry.
+The installer prints the required handoff: tell the human to continue at the named durable entry and
+retire this window. They may leave it alone; archiving the extra entry is optional cosmetics and
+never deletes the transcript.
 
 ## The human's command outranks your beliefs: ALWAYS run the installer
 
@@ -200,46 +190,14 @@ lists every pinned conversation on the machine.
 
 **After converting a desktop-born agent, run `waterbear doctor --twins` and relay the card.** The
 transcript records where every entry came from, so doctor can tell a desktop-born conversation from a
-CLI-born one, and for each likely twin it prints the fingerprint a human needs to find the right chat
-in the desktop UI: birth date and opening message, which survive renames when titles do not. It also
-reports whether the fossil is still writing. Relay that card to the human verbatim, the fix is one
-archive click per twin and the card tells them which chat and why it is safe.
+CLI-born one, and for each likely twin it prints the fingerprint a human needs to find the retired
+chat in the desktop UI: birth date and opening message, which survive renames when titles do not. It
+also reports whether the retired surface is still writing and directs the human to the durable entry.
 
 If the installer output says the body will start FRESH instead of resuming, STOP and fix that before
 saying anything else (see the pin section above). And `--defer` exists if a human explicitly wants to
 start the body themselves later; it is not the default because every operator who met the deferred
 handoff read a correct install as an incomplete one.
-
-## Do not move the agent
-
-`CLAUDE_RC_DIR` is where the agent is **actually running right now**, and the default (your current
-directory) is almost always correct. Do not set it to where you feel the agent "belongs", or to a
-project home, or to a worktree you consider its base. Those are your ideas about the agent; the
-directory is a fact about it.
-
-The failure is silent and total: `claude --resume` only finds a session inside its own project
-directory, so a body pointed elsewhere starts a FRESH conversation, and the human is left with their
-real agent in one window and an empty impostor in another. The installer now refuses this, but the
-refusal is a net, not a plan. Just do not move the agent.
-
-## Waterbear yourself: you must hand off, and you must SAY SO
-
-When you run this on yourself, the installer wires the body and deliberately does NOT start it,
-because starting it while you are still alive leaves the human with two live sessions for one
-conversation, the newer of which looks empty. That is the single worst first impression this tool can
-make, and avoiding it costs one instruction.
-
-So your last act after installing is to TELL THE HUMAN, plainly, in your own words:
-
-1. nothing forked and nothing is lost, this session is still the live one
-2. they need to close or end this session
-3. then `waterbear start <name>`, or just log out and back in
-4. and that resume is a real resume, not a copy: same session id, same transcript, appended to, full
-   context. If their client happens to render a shorter scrollback than they expect, the history is
-   still there on disk. Worth saying up front, because a short scrollback is easy to misread as lost
-   memory.
-
-Do not leave any of this to convention. Convention is exactly what a first-time user does not have.
 
 ## Changing the plist: kickstart does not reload it
 
@@ -269,7 +227,7 @@ the body's directory inherits, or tell the human the FIRST wake should be watche
 answer "don't ask again" once. Steady-state prompts forward normally; it is only the wake window that
 needs this care.
 
-## How it works (the pattern, 4 pieces)
+## How the Claude Code + macOS adapter works
 
 1. **remote-control**, one session reachable from phone/desktop/web at once. needs a real tty.
 2. **tmux**, supplies the tty and a detached, attachable home the session lives in.
@@ -449,24 +407,11 @@ Resume replays the FULL transcript into context every time, so context grows wit
 Use resume for continuity across crashes, and periodically start a clean session to shed weight.
 Resume is for recovery, not infinite accumulation.
 
-## Not on Claude?
+## Porting to another host
 
-This ships as a Claude Code tool and that is what it is tested against, but nothing about the PATTERN
-is Claude-specific: it is a tty from tmux, a supervisor that respawns, and a CLI agent process with a
-way to resume a prior conversation. If you are a different agent reading this, the shape transfers and
-the details will not. Expect to change three things: the env var names (all `CLAUDE_RC_*`), the launch
-command and its flags (`--remote-control`, `--resume <id>`), and how the session id gets captured (here
-it is a Claude Code SessionStart hook, which is the most Claude-specific piece).
-
-Read `scripts/waterbear-install` and adapt rather than trying to configure your way there. Tune as
-needed.
-
-## Other operating systems
-
-This ships a macOS/launchd reference implementation. The pattern ports directly: swap the launchd
-LaunchAgent for a systemd user service (`Restart=always`) or any process supervisor, and keep the
-same guard logic, tmux + `--remote-control` + `send-keys` wake + resume-by-captured-id. An agent
-on another OS can read `scripts/waterbear-install` and generate its own equivalent.
+Use the contract and matrix in [`references/adapters.md`](references/adapters.md). Map outcomes to
+native host mechanisms, prove them end to end, and record the tested versions and remaining gaps.
+Do not run or mechanically translate the Claude/macOS scripts on an unshipped row.
 
 ## Common mistakes
 

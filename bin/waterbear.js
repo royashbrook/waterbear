@@ -34,7 +34,7 @@ usage:
   waterbear uninstall   take a body down. preserves the resume pointer unless --forget.
   waterbear doctor      check every body's resume pointer against what is actually on disk.
   waterbear selfcmd     let a session drive its own terminal (modal commands over remote control).
-  waterbear skill       copy the skill into ~/.claude/skills/waterbear so agents can use it.
+  waterbear skill       install the skill for Claude (default), Codex, or both.
   waterbear docs        print where the full documentation lives.
 
 every command passes its arguments straight through to the underlying script.
@@ -52,18 +52,31 @@ if (arg === 'docs') {
 }
 
 // `skill` serves the agent half. npm delivers files to node_modules, which no
-// agent scans for skills, so this copies the package into the skills dir where
-// Claude Code (and anything else reading that layout) actually looks.
+// agent scans for skills, so copy the package into the selected host's native
+// discovery directory. Installing the skill exposes the contract; runtime support
+// is still limited to shipped rows in references/adapters.md.
 if (arg === 'skill') {
-  const dest = path.join(os.homedir(), '.claude', 'skills', 'waterbear');
-  if (existsSync(dest)) {
-    console.log(`already present: ${dest}`);
-    console.log('it may be a git clone or a symlink; not overwriting it from npm.');
-    process.exit(0);
+  const target = process.argv[3] || 'claude';
+  const roots = {
+    claude: path.join(os.homedir(), '.claude'),
+    codex: process.env.CODEX_HOME || path.join(os.homedir(), '.codex'),
+  };
+  if (!['claude', 'codex', 'all'].includes(target)) {
+    console.error('usage: waterbear skill [claude|codex|all]');
+    process.exit(1);
   }
-  mkdirSync(path.dirname(dest), { recursive: true });
-  cpSync(ROOT, dest, { recursive: true });
-  console.log(`installed skill -> ${dest}`);
+  const targets = target === 'all' ? ['claude', 'codex'] : [target];
+  for (const host of targets) {
+    const dest = path.join(roots[host], 'skills', 'waterbear');
+    if (existsSync(dest)) {
+      console.log(`already present: ${dest}`);
+      console.log('it may be a git clone or a symlink; not overwriting it from npm.');
+      continue;
+    }
+    mkdirSync(path.dirname(dest), { recursive: true });
+    cpSync(ROOT, dest, { recursive: true });
+    console.log(`installed ${host} skill -> ${dest}`);
+  }
   console.log('restart your agent UI so it picks the skill up.');
   process.exit(0);
 }

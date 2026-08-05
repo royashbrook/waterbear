@@ -8,12 +8,13 @@
   "files": [
     "bin/",
     "scripts/",
+    "references/",
     "SKILL.md",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "test": "bash -n scripts/waterbear-install && bash -n scripts/waterbear-start && bash -n scripts/waterbear-uninstall && bash -n scripts/waterbear-doctor && bash -n scripts/waterbear-selfcmd && bash -n scripts/rc-session-capture-hook && node scripts/check-version-sync.mjs && node scripts/check-guard-injection.mjs"
+    "test": "bash -n scripts/waterbear-install && bash -n scripts/waterbear-start && bash -n scripts/waterbear-uninstall && bash -n scripts/waterbear-doctor && bash -n scripts/waterbear-selfcmd && bash -n scripts/rc-session-capture-hook && node scripts/check-version-sync.mjs && node scripts/check-guard-injection.mjs && node scripts/check-skill-targets.mjs && node scripts/check-guidance-consistency.mjs"
   },
   "repository": {
     "type": "git",
