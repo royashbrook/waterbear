@@ -9,9 +9,9 @@ name: release
 #
 # The consequence worth understanding: a committed file can never hold its own
 # accurate version, because the patch depends on the commit that contains it. So
-# package.json and SKILL.md carry the tag-level BASE in the repo, and the computed
-# value is stamped into the published artifact only. Nothing is committed back,
-# which keeps CI from generating commits that would themselves move the number.
+# package.json carries the tag-level BASE in the repo, and the computed value is
+# stamped into the published artifact only. SKILL.md intentionally has no version
+# key because skill frontmatter does not allow one. Nothing is committed back.
 on:
   push:
     branches: [main]
@@ -69,13 +69,7 @@ jobs:
             const p = JSON.parse(fs.readFileSync("package.json", "utf8"));
             p.version = v;
             fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n");
-            const s = fs.readFileSync("SKILL.md", "utf8");
-            if (!/^version:\s*\S+\s*$/m.test(s)) {
-              console.error("SKILL.md frontmatter has no version: line to stamp.");
-              process.exit(1);
-            }
-            fs.writeFileSync("SKILL.md", s.replace(/^version:\s*\S+\s*$/m, "version: " + v));
-            console.log("stamped " + v + " into package.json + SKILL.md");
+            console.log("stamped " + v + " into package.json");
           '
 
       - run: npm test

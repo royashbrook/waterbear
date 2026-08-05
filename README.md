@@ -13,17 +13,18 @@
   <img src="https://img.shields.io/badge/claude%20code-skill-057b8d?style=flat-square" alt="Claude Code skill">
 </p>
 
-<p align="center"><strong>keep a <code>claude --remote-control</code> session alive through crashes, patches, quits, and reboots, and resume the same conversation when it comes back.</strong></p>
+<p align="center"><strong>keep a local terminal agent alive through crashes, patches, quits, and reboots, and resume the same conversation when it comes back.</strong></p>
 
 ---
 
 Named for the [tardigrade](https://en.wikipedia.org/wiki/Tardigrade) (the "water bear"): the animal
-that suspends its life under stress and revives when conditions return. Same trick, for a Claude Code
-session. A crash, a patch, a quit, or a reboot kills the process; waterbear brings it back on its own,
-and (optionally) resumes the exact prior conversation from disk so it returns as itself, mid-thought.
+that suspends its life under stress and revives when conditions return. A crash, a patch, a quit, or
+a reboot kills the process; waterbear brings it back and resumes the exact prior conversation.
 
-waterbear is local to one machine: it wires a launchd LaunchAgent + tmux + a `claude` CLI process on
-one mac, tied to that machine and user. It does not run in the cloud or follow you to another box.
+Waterbear defines a cross-substrate behavior contract and ships one runtime adapter today: Claude
+Code on macOS, using launchd + tmux + `claude --remote-control`. Other hosts are tracked honestly,
+not inferred from similarity; see the [adapter contract and support matrix](references/adapters.md).
+Waterbear is local to one machine and does not follow a session to another box.
 
 ## agents: start here
 
@@ -52,7 +53,9 @@ Via npm, which also gets you updates (`npm outdated` / `npm update -g` work like
 ```bash
 npx @royashbrook/waterbear install     # one-off, or:
 npm i -g @royashbrook/waterbear        # then: waterbear install / doctor / uninstall / selfcmd
-waterbear skill                        # copy the skill into ~/.claude/skills for your agent
+waterbear skill                        # install for Claude (backward-compatible default)
+waterbear skill codex                  # install the contract for Codex; runtime remains a matrix gap
+waterbear skill all                    # install both skill surfaces
 ```
 
 Or skip npm entirely; the installer is one script. Straight from the raw file:
@@ -84,12 +87,11 @@ claude.ai). Stop with `launchctl bootout gui/$(id -u)/com.<user>.claude-rc.myage
 **Prereqs:** the `claude` CLI (run `claude` once to log in: waterbear reuses your login, it does not
 handle auth) and `tmux` (`brew install tmux`).
 
-**Auth expiry:** the CLI runs on your subscription login (OAuth), which expires now and then. When it
-does, the session stays alive and shows an auth error on each request, so it announces itself (you
-see it via remote-control), it does not silently die. Run `claude` + `/login` at the machine to clear
-it. waterbear cannot drive a browser re-login, so this one stays a manual step. Expected with a
-subscription backbone. (The guard also has a crashloop net that notifies and backs off if a session
-genuinely dies in a loop, e.g. a bad resume id; an expired login does not trigger that.)
+**Auth expiry:** the CLI runs on your subscription login (OAuth), which expires now and then. The
+tmux body can remain alive while remote control is unavailable, leaving phone and desktop views with
+no useful signal. Inspect the tmux pane, complete `claude` + `/login` at the machine, then restart
+the body so remote control registers again. Waterbear cannot drive browser authentication, and
+doctor does not yet prove auth or remote reachability.
 
 ## waterbear never moves your agent
 
@@ -136,16 +138,15 @@ view loses nothing.
 ## a waterbeared agent is a singleton
 
 One conversation, one body, ever. The installer refuses to wire a conversation that already has a
-body under any name, and tells you where the existing one is. The one surface it cannot close for
-you: a conversation born in the desktop app keeps its native chat there, alongside the remote-control
-entry (mobile dedupes these, desktop shows both). That native chat is a live second copy, so the
-installer tells you to archive it, and that instruction is part of the conversion, not a suggestion.
-Archiving removes the surface, never the data.
+body under any name, and tells you where the existing one is. A conversation born in the desktop app
+keeps its native chat beside the remote-control entry (mobile dedupes these, desktop shows both).
+The installer retires that surface and tells you which durable entry to use. Leave the retired chat
+alone; archiving the extra entry is optional cosmetics and never removes the transcript.
 
 Already converted some agents and suspect leftovers? `waterbear doctor --twins` audits every body on
 the machine: it reads each conversation's transcript to tell desktop-born from CLI-born, and prints a
 fingerprint (birth date + opening message, which survive renames when titles do not) for each likely
-twin, plus whether that twin is still writing. One archive click per card.
+twin, plus whether that retired surface is still writing and which durable entry to use.
 
 ## waterbear yourself: it just takes over
 
@@ -224,7 +225,7 @@ wake attended (`tmux attach -t <name>`) and answer "don't ask again" once. After
 wake, a body that looks busy-but-silent from remote is worth one look in tmux before assuming it is
 thinking.
 
-## how it works
+## how the Claude Code + macOS adapter works
 
 Four pieces, each doing one job:
 
@@ -476,12 +477,11 @@ the wrong body silently. Keep using the body you want and let its capture hook k
 don't hand-set the id from a session you're not sure is the right one. See
 [`SKILL.md`](SKILL.md) → Common mistakes.
 
-## other operating systems
+## other agents and operating systems
 
-This is a macOS/launchd reference implementation. The pattern ports directly: swap the LaunchAgent for
-a systemd user service (`Restart=always`) or any process supervisor, and keep the guard logic: tmux +
-`--remote-control` + `send-keys` wake + resume-by-captured-id. Read
-[`scripts/waterbear-install`](scripts/waterbear-install) and adapt.
+Read the [adapter contract and support matrix](references/adapters.md). Linux/systemd is currently a
+bridge candidate, not a shipped port; Codex, Grok, agy, and Windows remain explicit runtime gaps.
+Do not run or mechanically translate the Claude/macOS scripts until the target row is proven.
 
 ## license
 
