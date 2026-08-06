@@ -57,7 +57,16 @@ fi
 USER_NAME="$(id -un)"
 LABEL="com.${USER_NAME}.claude-rc.${NAME}"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
-IDFILE="${CLAUDE_RC_SESSION_FILE:-$HOME/.claude/rc-session-${NAME}}"
+# CLAUDE_RC_SESSION_FILE is ambient inside every waterbear body, so honoring it unconditionally
+# points ANY uninstall run from inside a body at the CALLER'S pointer: `waterbear-uninstall other
+# --forget` from theo's session would delete theo's conversation while claiming to forget other's
+# (found live 2026-08-06, the #27 ambient-identity leak class). the env override is only meaningful
+# when the seat being torn down IS the seat whose env this is.
+if [ -n "${CLAUDE_RC_SESSION_FILE:-}" ] && [ "${CLAUDE_RC_NAME:-}" = "$NAME" ]; then
+  IDFILE="$CLAUDE_RC_SESSION_FILE"
+else
+  IDFILE="$HOME/.claude/rc-session-${NAME}"
+fi
 
 # the doorbell OFFSET sidecar (<doorbell>.offset, #26) is waterbear's artifact; the signal
 # file itself is the user's and is never touched. read the doorbell path now, before the
@@ -94,14 +103,20 @@ EOF
   fi
 fi
 
-echo "waterbear-uninstall: $NAME  (mode: $MODE${DRY:+, dry-run})"
+# DRY is 0/1, never empty, so ${DRY:+...} expanded on EVERY run and the banner claimed dry-run
+# while really deleting (and a real --dry-run printed past-tense "removed ..." below): a safety
+# label wrong in both directions (theo floor find, 2026-08-06). tag from an actual test, and
+# `did` speaks in the right tense for action lines (run() already guards the actions themselves).
+dtag=""; [ "$DRY" -eq 1 ] && dtag=", dry-run"
+did() { if [ "$DRY" -eq 1 ]; then echo "  would: $*"; else echo "  $*"; fi; }
+echo "waterbear-uninstall: $NAME  (mode: $MODE$dtag)"
 echo
 
 # launchd first. It is the thing that RESPAWNS, so killing tmux while it is still
 # loaded just hands you a fresh body a second later.
 if launchctl print "gui/$(id -u)/${LABEL}" >/dev/null 2>&1; then
   run "launchctl bootout gui/$(id -u)/${LABEL}"
-  echo "  stopped the LaunchAgent"
+  did "stopped the LaunchAgent"
 else
   echo "  LaunchAgent was not loaded"
 fi
@@ -115,14 +130,14 @@ fi
 
 if [ -f "$PLIST" ]; then
   run "rm -f '$PLIST'"
-  echo "  removed $PLIST"
+  did "removed $PLIST"
 else
   echo "  no plist at $PLIST"
 fi
 
 if tmux has-session -t "$NAME" 2>/dev/null; then
   run "tmux kill-session -t '$NAME'"
-  echo "  killed the tmux session"
+  did "killed the tmux session"
 else
   echo "  no tmux session named $NAME"
 fi
@@ -131,14 +146,14 @@ echo
 if [ "$MODE" = "forget" ]; then
   if [ -f "$IDFILE" ]; then
     run "rm -f '$IDFILE'"
-    echo "  FORGOT the resume pointer ($IDFILE)."
+    did "FORGOT the resume pointer ($IDFILE)."
     echo "  that conversation's transcript is still on disk, but nothing names it any more."
   else
     echo "  no resume pointer to forget ($IDFILE)"
   fi
   if [ -n "$DB_OFF" ] && [ -f "$DB_OFF" ]; then
     run "rm -f '$DB_OFF'"
-    echo "  removed the doorbell offset sidecar ($DB_OFF). the signal file was not touched."
+    did "removed the doorbell offset sidecar ($DB_OFF). the signal file was not touched."
   fi
 else
   if [ -f "$IDFILE" ]; then
