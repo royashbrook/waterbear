@@ -429,6 +429,55 @@ net_up() {
   curl -sf -I --max-time 5 "$CONNECT_URL" >/dev/null 2>&1
 }
 
+# Run a command with a wall-clock bound. Returns the command's status, or 124 if it
+# had to be killed.
+#
+# WHY THIS EXISTS. Every tmux call here is a CLIENT talking to the tmux server over a
+# socket, and a client waits for the server's reply with no timeout of its own. If the
+# server does not answer, the call blocks forever, and because delivery is a single
+# sequential loop, one blocked call takes that seat off the bus permanently. Seen live:
+# a `send-keys` forked 2026-08-12 06:59 was still sitting in S when it was found on
+# 08-15, and the seat had been deaf for 3 days 9 hours behind it. Killing that one
+# process drained the backlog within seconds, so the guard was healthy the whole time
+# and simply waiting on a call that never returned. The delivery contract below is
+# careful and correct about a send that FAILS, and had no answer for a send that never
+# returns at all.
+#
+# NOT coreutils `timeout`: it is not on a clean macOS, and this ships to other people's
+# machines. Backgrounding plus a kill -0 poll needs nothing but the shell.
+#
+# The poll is 1s, so the bound is approximate. That is fine: this separates "wedged"
+# from "working", not "slow" from "fast".
+bounded() {
+  local secs="$1"; shift
+  "$@" &
+  local p=$! waited=0
+  while kill -0 "$p" 2>/dev/null; do
+    if [ "$waited" -ge "$secs" ]; then
+      kill -9 "$p" 2>/dev/null || true
+      wait "$p" 2>/dev/null || true
+      return 124
+    fi
+    sleep 1
+    waited=$(( waited + 1 ))
+  done
+  wait "$p"
+}
+
+# Same bound, for a call whose STDOUT we need. Output lands in $BOUNDED_OUT rather than
+# a command substitution, because $(...) would block on the child exactly like the bare
+# call does and there would be nothing left to bound.
+bounded_out() {
+  local secs="$1"; shift
+  local tmpf="${TMPDIR:-/tmp}/.wb-bounded.$$"
+  BOUNDED_OUT=''
+  bounded "$secs" sh -c 'exec "$@" >"$0" 2>/dev/null' "$tmpf" "$@"
+  local rc=$?
+  [ "$rc" -eq 0 ] && BOUNDED_OUT=$(cat "$tmpf" 2>/dev/null || true)
+  rm -f "$tmpf" 2>/dev/null || true
+  return $rc
+}
+
 # crashloop detection: if the session GENUINELY dies + respawns fast (a bad resume id, corrupt state,
 # disk full, etc.), stop hammering, notify the human once, and back off. NOTE: an expired login does
 # NOT trigger this , that leaves the session ALIVE showing an auth error (visible via remote-control),
@@ -655,7 +704,12 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
         # typed PREFIX with a faint completion is real input and still defers, because only
         # the faint span is dropped.
         pane_ok=0
-        pane_txt=$(tmux capture-pane -pe -t "$NAME" 2>/dev/null || true)
+        # bounded: a wedged tmux server hangs a capture exactly like it hangs a send.
+        # On a timeout pane_txt is empty, which falls through to the existing
+        # "unreadable: retry next tick" path, so a stuck capture defers a ring instead
+        # of stranding the seat.
+        bounded_out 10 tmux capture-pane -pe -t "$NAME" || true
+        pane_txt="$BOUNDED_OUT"
         if [ -n "$pane_txt" ]; then
           nbsp="$(printf '\302\240')"
           esc="$(printf '\033')"
@@ -676,13 +730,25 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
         [ "$pane_ok" -eq 1 ] || break                        # busy/unreadable: retry next tick
         msg=$(printf '%s' "$line" | cut -c1-400)
         [ ${#line} -gt 400 ] && msg="$msg (truncated, full line in the signal file)"
-        if tmux send-keys -t "$NAME" -l "[doorbell] $msg" 2>/dev/null; then
+        # BOUNDED (see `bounded` above): a send that HANGS is treated as the send-FAILED
+        # path, which the contract already handles. The offset stays put and the next
+        # tick retries, so a wedged tmux costs a LATE ring instead of a deaf seat. 15s is
+        # far past any healthy send (they return in milliseconds) and far short of a
+        # human noticing.
+        bounded 15 tmux send-keys -t "$NAME" -l "[doorbell] $msg" 2>/dev/null
+        send_rc=$?
+        if [ "$send_rc" -eq 0 ]; then
           sleep 1
-          tmux send-keys -t "$NAME" Enter 2>/dev/null || true
+          bounded 15 tmux send-keys -t "$NAME" Enter 2>/dev/null || true
           db_off=$(( db_off + line_len + 1 ))               # consume ONLY after a successful send
           printf '%s' "$db_off" > "$OFF_FILE" 2>/dev/null || true
           sleep 1
         else
+          # Distinguish the two in the log: a plain failure is routine (pane gone,
+          # session mid-respawn), a TIMEOUT means the tmux server did not answer and is
+          # the defect this bound exists for. Without the label a recurrence reads as
+          # ordinary churn.
+          [ "$send_rc" -eq 124 ] && printf 'waterbear: send-keys TIMED OUT after 15s (tmux server not answering); ring deferred, offset untouched\n' >&2
           break                                              # send failed: offset untouched, retry
         fi
       done
