@@ -44,9 +44,9 @@ scripts/waterbear-selfcmd --where          # attach command, for when a human re
 **Give the human the attach command before you drive.** Every driving form prints it first:
 
 ```
-attach: tmux attach -t theo
+attach: tmux attach -t max
   (if this goes wrong, that command puts you in the terminal. Ctrl-b d detaches.)
-screen: /Users/you/.claude/waterbear-screen-theo.txt
+screen: /Users/you/.claude/waterbear-screen-max.txt
 ```
 
 Relay that `attach:` line in the same message where you say you are driving. This is the one thing you
@@ -136,7 +136,7 @@ whether a conversation survives. `scripts/waterbear-uninstall <name>` does the r
 | `--forget` | all of the above, plus deletes the resume pointer | **unreachable** |
 
 **The file that must survive a teardown is `~/.claude/rc-session-<name>`.** It reads like a name file
-and is not one: it holds a SESSION ID. It is the only pointer from the name `kai` to the
+and is not one: it holds a SESSION ID. It is the only pointer from the name `max` to the
 conversation that agent has been having, and nothing regenerates it, because the id was minted by a
 session that no longer exists. Deleting it during cleanup looks like tidying and is data loss: the
 transcript is still on disk, but nothing knows which of hundreds of files it is.

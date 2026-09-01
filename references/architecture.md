@@ -99,7 +99,7 @@ Because this is a failure that looks exactly like success, check it rather than 
 
 ```sh
 scripts/waterbear-doctor            # every body it can find
-scripts/waterbear-doctor kai theo   # named ones
+scripts/waterbear-doctor max sam   # named ones
 ```
 
 It does not ask whether the file exists. It asks whether the id names a transcript on disk, and
