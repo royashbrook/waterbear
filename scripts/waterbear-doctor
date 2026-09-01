@@ -141,9 +141,9 @@ else:
     print(f"        - started {born}")
     print(f"        - begins: \"{ex}\"")
     print(f"      desktop-side entries so far: {desk_n}, most recent {last}")
-    print(f"      fix: ARCHIVE that chat in the desktop app. this removes the surface,")
-    print(f"      never the data; the transcript on disk is the conversation and the")
-    print(f"      body carries all of it.")
+    print(f"      fix: retire it, stop typing there and use the agent's named entry.")
+    print(f"      archiving the chat is the tidy way to remove the temptation: it removes")
+    print(f"      the surface, never the data; the body carries the whole transcript.")
 TWIN_PY
   fi
 

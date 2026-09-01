@@ -1013,8 +1013,8 @@ echo
 # the native chat is not a stale view, it is a live client that will answer if typed
 # into. Every desktop-origin conversion leaves one behind, structurally. The data is
 # never at risk (one transcript on disk either way), but two answering copies of one
-# agent is the singleton rule broken in the UI, so closing the native chat is a
-# REQUIRED step of a desktop-origin conversion, not a tip.
+# agent is the singleton rule broken in the UI. The emitted handoff RETIRES the
+# surface (the human learns which door is real); archiving stays optional cosmetics.
 if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] && [ "${CLAUDE_CODE_ENTRYPOINT:-cli}" != "cli" ]; then
   cat <<FOSSIL_EOF
 

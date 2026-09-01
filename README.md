@@ -139,8 +139,9 @@ One conversation, one body, ever. The installer refuses to wire a conversation t
 body under any name, and tells you where the existing one is. The one surface it cannot close for
 you: a conversation born in the desktop app keeps its native chat there, alongside the remote-control
 entry (mobile dedupes these, desktop shows both). That native chat is a live second copy, so the
-installer tells you to archive it, and that instruction is part of the conversion, not a suggestion.
-Archiving removes the surface, never the data.
+installer's handoff retires it: from then on you talk to the agent at its named entry, and the old
+window is left to sink. Archiving the retired chat is optional cosmetics, it removes the surface,
+never the data; what matters is knowing which door is the real one.
 
 Already converted some agents and suspect leftovers? `waterbear doctor --twins` audits every body on
 the machine: it reads each conversation's transcript to tell desktop-born from CLI-born, and prints a

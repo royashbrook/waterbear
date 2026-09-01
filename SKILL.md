@@ -116,16 +116,18 @@ So after installing, tell the human three true things, and no homework:
 
 1. done: this conversation is now durable, it survives crashes, patches, quits, and reboots
 2. the window may blink or briefly show a stale view while remote control re-registers; the
-   conversation underneath is one transcript on disk and it is whole
+   conversation underneath is one transcript on disk and it is whole, and a shorter-than-expected
+   scrollback is a render artifact, not lost memory
 3. they can reach it from anywhere: their phone, the desktop app, or `tmux attach -t <name>`
 
-**One exception to "no homework", and it is required, not a tip.** If this conversation was BORN in
-the desktop app (the installer detects this and says so), the desktop keeps its NATIVE chat for the
-conversation alongside the new remote-control entry. That native chat is not a stale view: it is a
-live second copy of this agent and will answer if typed into. Mobile dedupes the two surfaces;
-desktop shows both. Tell the human to **archive the native desktop chat** as soon as the body
-confirms. Archiving removes the surface, never the data, the transcript on disk is the conversation
-and the body carries all of it.
+**One addition for desktop-born conversations (the installer detects this and says so).** The
+desktop keeps its NATIVE chat for the conversation alongside the new remote-control entry. That
+native chat is not a stale view: it is a live second copy of this agent and will answer if typed
+into. Mobile dedupes the two surfaces; desktop shows both. So the handoff message (the installer
+emits it, relay it) tells the human this window is the RETIRED surface: talk to the agent at its
+named entry from now on, leave this one to sink. Archiving the retired chat is optional cosmetics,
+offered only "if the extra entry bothers you": it removes a surface, never data. What keeps the
+agent converged is the human knowing which door is real, not the archive click.
 
 ## The human's command outranks your beliefs: ALWAYS run the installer
 
@@ -209,37 +211,6 @@ If the installer output says the body will start FRESH instead of resuming, STOP
 saying anything else (see the pin section above). And `--defer` exists if a human explicitly wants to
 start the body themselves later; it is not the default because every operator who met the deferred
 handoff read a correct install as an incomplete one.
-
-## Do not move the agent
-
-`CLAUDE_RC_DIR` is where the agent is **actually running right now**, and the default (your current
-directory) is almost always correct. Do not set it to where you feel the agent "belongs", or to a
-project home, or to a worktree you consider its base. Those are your ideas about the agent; the
-directory is a fact about it.
-
-The failure is silent and total: `claude --resume` only finds a session inside its own project
-directory, so a body pointed elsewhere starts a FRESH conversation, and the human is left with their
-real agent in one window and an empty impostor in another. The installer now refuses this, but the
-refusal is a net, not a plan. Just do not move the agent.
-
-## Waterbear yourself: you must hand off, and you must SAY SO
-
-When you run this on yourself, the installer wires the body and deliberately does NOT start it,
-because starting it while you are still alive leaves the human with two live sessions for one
-conversation, the newer of which looks empty. That is the single worst first impression this tool can
-make, and avoiding it costs one instruction.
-
-So your last act after installing is to TELL THE HUMAN, plainly, in your own words:
-
-1. nothing forked and nothing is lost, this session is still the live one
-2. they need to close or end this session
-3. then `waterbear start <name>`, or just log out and back in
-4. and that resume is a real resume, not a copy: same session id, same transcript, appended to, full
-   context. If their client happens to render a shorter scrollback than they expect, the history is
-   still there on disk. Worth saying up front, because a short scrollback is easy to misread as lost
-   memory.
-
-Do not leave any of this to convention. Convention is exactly what a first-time user does not have.
 
 ## Changing the plist: kickstart does not reload it
 
