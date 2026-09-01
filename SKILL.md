@@ -269,6 +269,16 @@ the body's directory inherits, or tell the human the FIRST wake should be watche
 answer "don't ask again" once. Steady-state prompts forward normally; it is only the wake window that
 needs this care.
 
+The same rule extends past the wake. If the install wires a ring transport (`CLAUDE_RC_DOORBELL` or
+any wake adapter), a ring's RECEIVE path also runs unattended: open the payload the ring references,
+run any pull that makes it current, write any offset/receipt state. Any of those hitting a fresh
+permission prompt stalls the session just as invisibly as a blocked wake. The
+[doorbell skill](https://github.com/royashbrook/doorbell) specifies the first-use permission
+preflight for that path (map the receive steps, request narrow persistent approvals, finish with a
+cold no-prompt proof: go idle, send a realistic ring, watch it complete with no human prompt);
+follow it rather than a re-derivation here. Re-run that proof when paths, task identity, or the
+permission profile change.
+
 ## How it works (the pattern, 4 pieces)
 
 1. **remote-control**, one session reachable from phone/desktop/web at once. needs a real tty.

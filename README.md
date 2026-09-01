@@ -224,6 +224,12 @@ wake attended (`tmux attach -t <name>`) and answer "don't ask again" once. After
 wake, a body that looks busy-but-silent from remote is worth one look in tmux before assuming it is
 thinking.
 
+If the install wires a doorbell, the receive path (reading a ring's payload, any pull, any
+offset/receipt write) needs the same prompt-free treatment, plus a cold proof that a real ring
+completes unattended. The [doorbell skill](https://github.com/royashbrook/doorbell) owns that
+first-use preflight; run it as part of setup instead of discovering the gap on the first
+unattended ring.
+
 ## how it works
 
 Four pieces, each doing one job:
