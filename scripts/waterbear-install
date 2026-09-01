@@ -129,6 +129,33 @@ BIN_DIR="$HOME/.local/bin"
 GUARD="$BIN_DIR/claude-rc-keepalive"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 
+# A doorbell or session-file value that ANOTHER body's plist already carries is that body's
+# identity, never a choice the caller made for this one: every guard injects these into its own
+# session's env, so an install run from inside a body sees the caller's values as ordinary env
+# and the ambient-strip above cannot tell (they live in the session env, which reads as
+# deliberate). Two bodies sharing one signal file is always wrong (double delivery), and the
+# collateral is worse: uninstalling the new body deletes the REAL body's .offset sidecar (found
+# live 2026-09-01: a throwaway install adopted the caller's doorbell, its teardown wiped the
+# caller's delivery position). Same rule uninstall applies to SESSION_FILE since #27.
+for _p in "$HOME/Library/LaunchAgents"/com.*.claude-rc.*.plist; do
+  [ -f "$_p" ] || continue
+  [ "$_p" = "$PLIST" ] && continue
+  if [ -n "$DOORBELL" ]; then
+    _od="$(plutil -extract EnvironmentVariables.CLAUDE_RC_DOORBELL raw "$_p" 2>/dev/null || true)"
+    if [ "$_od" = "$DOORBELL" ]; then
+      echo "waterbear: ignoring CLAUDE_RC_DOORBELL, it is another body's doorbell ($(basename "$_p")); a doorbell names ONE body" >&2
+      DOORBELL=""
+    fi
+  fi
+  if [ -n "${CLAUDE_RC_SESSION_FILE:-}" ]; then
+    _os="$(plutil -extract EnvironmentVariables.CLAUDE_RC_SESSION_FILE raw "$_p" 2>/dev/null || true)"
+    if [ "$_os" = "$CLAUDE_RC_SESSION_FILE" ]; then
+      echo "waterbear: ignoring CLAUDE_RC_SESSION_FILE, it is another body's id file ($(basename "$_p"))" >&2
+      unset CLAUDE_RC_SESSION_FILE
+    fi
+  fi
+done
+
 # --- INHERIT what the caller did not pass, from the body's existing plist ---
 #
 # Re-running the installer is the repair path, and the repairer is often the agent
