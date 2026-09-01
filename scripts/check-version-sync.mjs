@@ -24,10 +24,10 @@ if (!pkg.version) {
   process.exit(1);
 }
 
-const m = skill.match(/^version:\s*(\S+)\s*$/m);
+const m = skill.match(/^  version:\s*(\S+)\s*$/m);
 if (!m) {
-  console.error('SKILL.md frontmatter has no version: line.');
-  console.error('release CI stamps the derived version into that line, so it must exist.');
+  console.error('SKILL.md metadata has no version: line.');
+  console.error('release CI stamps the derived version into that metadata line, so it must exist.');
   process.exit(1);
 }
 

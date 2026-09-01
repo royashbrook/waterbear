@@ -70,11 +70,11 @@ jobs:
             p.version = v;
             fs.writeFileSync("package.json", JSON.stringify(p, null, 2) + "\n");
             const s = fs.readFileSync("SKILL.md", "utf8");
-            if (!/^version:\s*\S+\s*$/m.test(s)) {
-              console.error("SKILL.md frontmatter has no version: line to stamp.");
+            if (!/^  version:\s*\S+\s*$/m.test(s)) {
+              console.error("SKILL.md metadata has no version: line to stamp.");
               process.exit(1);
             }
-            fs.writeFileSync("SKILL.md", s.replace(/^version:\s*\S+\s*$/m, "version: " + v));
+            fs.writeFileSync("SKILL.md", s.replace(/^  version:\s*\S+\s*$/m, "  version: " + v));
             console.log("stamped " + v + " into package.json + SKILL.md");
           '
 
