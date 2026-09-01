@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# waterbear-park — reversible "down on purpose, stays down across reboots".
+#
+# The gap this fills (#31): uninstall --stop boots the guard out but leaves the RunAtLoad
+# plist live, so the body returns at next login, and plain remove deletes the wiring and
+# needs a reinstall. Parking renames the plist to <label>.plist.park: launchd never loads a
+# .park file, so the body stays down through every reboot, and unparking is a rename back +
+# bootstrap, nothing is rebuilt. The resume pointer and doorbell offset are never touched,
+# a parked body wakes as itself.
+set -u
+
+NAME=""
+WAKE=0
+DRY=0
+FORCE_SELF=0
+for a in "$@"; do
+  case "$a" in
+    --wake)    WAKE=1 ;;
+    --dry-run) DRY=1 ;;
+    --self)    FORCE_SELF=1 ;;
+    -h|--help) NAME="" ; break ;;
+    -*)        echo "waterbear-park: unknown flag $a" >&2; exit 1 ;;
+    *)         NAME="$a" ;;
+  esac
+done
+
+if [ -z "$NAME" ]; then
+  cat <<'EOF'
+usage: waterbear-park <name> [--wake] [--self] [--dry-run]
+
+  (default)  park: stop the guard, kill the tmux session, rename the plist to .park.
+             the body stays down across logins and reboots until you --wake it.
+  --wake     unpark: rename the plist back and bootstrap it; the body comes up
+             resuming its conversation.
+  --self     allow parking the body you are running inside (this shell dies mid-command).
+  --dry-run  print the plan.
+
+parking preserves everything a resume needs (the id file, the doorbell offset). it is
+"down on purpose", not teardown; for teardown see waterbear-uninstall.
+EOF
+  exit 0
+fi
+
+USER_NAME="$(id -un)"
+LABEL="com.${USER_NAME}.claude-rc.${NAME}"
+PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+PARKED="${PLIST}.park"
+
+run() { if [ "$DRY" -eq 1 ]; then printf '  would: %s\n' "$*"; else printf '  %s\n' "$*"; eval "$@"; fi; }
+
+if [ "$WAKE" -eq 1 ]; then
+  # unpark. idempotent: already live = just make sure it is loaded.
+  if [ -f "$PARKED" ]; then
+    run "mv '$PARKED' '$PLIST'"
+  elif [ ! -f "$PLIST" ]; then
+    echo "waterbear-park: nothing to wake, neither $PLIST nor its .park exists (was $NAME ever installed?)" >&2
+    exit 1
+  else
+    echo "  ($NAME was not parked; loading the live plist)"
+  fi
+  run "launchctl bootstrap gui/$(id -u) '$PLIST' 2>/dev/null || launchctl load -w '$PLIST'"
+  run "launchctl enable gui/$(id -u)/${LABEL} 2>/dev/null || true"
+  [ "$DRY" -eq 1 ] && exit 0
+  # verify the effect, not the declaration: a body that never comes up is the quietest failure.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    tmux has-session -t "$NAME" 2>/dev/null && { echo "waterbear-park: $NAME is awake (tmux session up, resuming its conversation)"; exit 0; }
+    sleep 1
+  done
+  echo "waterbear-park: plist loaded but no tmux session '$NAME' after 10s. check /tmp/${LABEL}.err" >&2
+  exit 1
+fi
+
+# park. refuse self unless deliberate, same reasoning as uninstall: dying mid-command
+# leaves the guard gone and the body up with nothing to respawn it.
+if [ -n "${TMUX:-}" ] && [ "$FORCE_SELF" -ne 1 ]; then
+  MY_SESSION="$(tmux display -p '#{session_name}' 2>/dev/null || echo '')"
+  if [ "$MY_SESSION" = "$NAME" ]; then
+    echo "refusing: '$NAME' is the session you are running inside. pass --self if you mean it." >&2
+    exit 2
+  fi
+fi
+
+if [ -f "$PARKED" ] && [ ! -f "$PLIST" ]; then
+  echo "waterbear-park: $NAME is already parked ($PARKED)"
+  exit 0
+fi
+if [ ! -f "$PLIST" ]; then
+  echo "waterbear-park: no plist at $PLIST (was $NAME ever installed?)" >&2
+  exit 1
+fi
+
+echo "waterbear-park: parking $NAME"
+# guard first (it is the thing that respawns), then the session, then the rename that
+# makes it reboot-stable.
+run "launchctl bootout gui/$(id -u)/${LABEL} 2>/dev/null || true"
+run "tmux kill-session -t '$NAME' 2>/dev/null || true"
+run "mv '$PLIST' '$PARKED'"
+[ "$DRY" -eq 1 ] && exit 0
+echo "waterbear-park: $NAME is parked. it will NOT return at login/reboot. wake it with:"
+echo "  waterbear-park $NAME --wake"

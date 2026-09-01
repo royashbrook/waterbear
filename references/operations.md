@@ -124,6 +124,22 @@ human, and hand them `tmux attach -t <name>` rather than making them remember it
   start, so the safest path is to just keep using the body you want and let its hook keep the id file
   current.
 
+## Parking a body (down on purpose, reboot-stable)
+
+`waterbear-uninstall --stop` boots the guard out but leaves the RunAtLoad plist live, so the body
+returns at next login; plain remove deletes the wiring. Parking is the reversible middle:
+
+```sh
+scripts/waterbear-park <name>          # stop guard, kill session, rename plist to .plist.park
+scripts/waterbear-park <name> --wake   # rename back, bootstrap, verify the session comes up
+```
+
+launchd never loads a `.park` file, so a parked body stays down through every login and reboot
+until it is woken, and waking rebuilds nothing: the resume pointer and doorbell offset were never
+touched, so it comes back as itself. Parking the body you are inside needs `--self` (the shell
+dies mid-command), and `--dry-run` prints the plan. Park is "down on purpose"; for actual
+teardown, read on.
+
 ## Taking a body down
 
 Teardown is three operations that people say with one word, and the difference between them is

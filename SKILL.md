@@ -241,4 +241,5 @@ The operating core is above; the rest moved to references, read on demand:
   the nested-session hazard and `waterbear-doctor`, porting off Claude or off macOS.
 - [references/operations.md](references/operations.md): the CONVERGE desktop-twin repair, driving
   your own terminal for modal commands (`waterbear-selfcmd`), renaming, common mistakes, and
-  taking a body down (`waterbear-uninstall`, and which teardown preserves the conversation).
+  parking (`waterbear-park`, reboot-stable down-on-purpose), and taking a body down
+  (`waterbear-uninstall`, and which teardown preserves the conversation).

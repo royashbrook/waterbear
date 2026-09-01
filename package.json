@@ -13,7 +13,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "bash -n scripts/waterbear-install && bash -n scripts/waterbear-start && bash -n scripts/waterbear-uninstall && bash -n scripts/waterbear-doctor && bash -n scripts/waterbear-selfcmd && bash -n scripts/rc-session-capture-hook && node scripts/check-version-sync.mjs && node scripts/check-guard-injection.mjs && bash scripts/check-stale-guidance.sh"
+    "test": "bash -n scripts/waterbear-install && bash -n scripts/waterbear-start && bash -n scripts/waterbear-uninstall && bash -n scripts/waterbear-doctor && bash -n scripts/waterbear-park && bash -n scripts/waterbear-selfcmd && bash -n scripts/rc-session-capture-hook && node scripts/check-version-sync.mjs && node scripts/check-guard-injection.mjs && bash scripts/check-stale-guidance.sh"
   },
   "repository": {
     "type": "git",
