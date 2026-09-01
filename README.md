@@ -260,7 +260,7 @@ start on the next respawn.
 | env | meaning |
 |---|---|
 | `CLAUDE_RC_NAME` | internal id: tmux name + launchd label + id file (default `claude`; keep short, no spaces) |
-| `CLAUDE_RC_TITLE` | display title in the session list (default = NAME; may have spaces, e.g. `"Roy - Theaetetus"`) |
+| `CLAUDE_RC_TITLE` | display title in the session list (default = NAME; may have spaces, e.g. `"Max - Ops"`) |
 | `CLAUDE_RC_DIR` | working directory (default `$HOME`) |
 | `CLAUDE_RC_WAKE` | prompt typed on a FRESH respawn (identity / bootstrap) |
 | `CLAUDE_RC_RESUME` | `1` = resume the prior conversation by id instead of a fresh one |
@@ -471,6 +471,11 @@ scripts/waterbear-doctor max sam   # named ones
 It does not ask whether the file exists. It asks whether the id names a transcript on disk, and
 whether that transcript is the size and age of real work. A pointer at a 60 KB file last touched
 three days ago is a pointer at the wrong thing.
+
+The other check that looks like success while failing: `claude update` leaves every running body
+on the old binary. `scripts/waterbear-restart --list` shows the drift and
+`scripts/waterbear-restart <name>` rolls one body onto the installed version by restarting only
+its client (the guard resumes the conversation). Details in `references/operations.md`.
 
 ## the resume caveat
 
