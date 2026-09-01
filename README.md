@@ -396,9 +396,9 @@ scripts/waterbear-selfcmd --keys Down Enter   # drive the modal that just opened
 Every driving form leads with the way back in, before it touches anything:
 
 ```
-attach: tmux attach -t theo
+attach: tmux attach -t max
   (if this goes wrong, that command puts you in the terminal. Ctrl-b d detaches.)
-screen: /Users/you/.claude/waterbear-screen-theo.txt
+screen: /Users/you/.claude/waterbear-screen-max.txt
 ```
 
 That is deliberate. Self-driving is the one thing an agent does that can lock you out of your own
@@ -465,7 +465,7 @@ Because this is a failure that looks exactly like success, check it rather than 
 
 ```sh
 scripts/waterbear-doctor            # every body it can find
-scripts/waterbear-doctor kai theo   # named ones
+scripts/waterbear-doctor max sam   # named ones
 ```
 
 It does not ask whether the file exists. It asks whether the id names a transcript on disk, and
