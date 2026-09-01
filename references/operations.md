@@ -140,6 +140,32 @@ touched, so it comes back as itself. Parking the body you are inside needs `--se
 dies mid-command), and `--dry-run` prints the plan. Park is "down on purpose"; for actual
 teardown, read on.
 
+## Rolling bodies onto a new binary
+
+`claude update` installs a new binary and touches no running client: every body keeps running
+the old version (and the old model) until something restarts it, and the backend gates
+remote-control resume on a minimum client version, so the drift is an outage waiting for its
+moment, not cosmetic. The restart is cheap because the guard already does the hard part:
+
+```sh
+scripts/waterbear-restart --list     # per body: running client version vs installed binary
+scripts/waterbear-restart <name>     # idle-gate, kill the CLIENT, verify the respawn
+```
+
+It kills the client process in the tmux pane, never the guard and never by a `*claude*` glob
+(that takes out the guard and every other body on the machine); the guard respawns the session
+on the installed binary with `--resume`, so the conversation survives. It refuses a body whose
+composer holds input or whose turn is in flight (both would be eaten), reading the pane with
+escapes so the client's faint ghost-autocomplete does not read as typed text. It then verifies
+the effect, not the declaration: a new pid, the running version equal to the installed one, and
+remote control actually registered. Registration can fail on the way up during a desktop-app
+update window (`/rc failed` in the status bar) while the session itself resumes fine, so the verb
+re-bounces once for that and stops with a real finding if it fails twice.
+
+Rolling several bodies is the operator's loop, on purpose: restart one as the canary, watch it
+resume end to end, then the rest, and the body you are working from last (`--self`, and your
+current turn does not survive the kill).
+
 ## Taking a body down
 
 Teardown is three operations that people say with one word, and the difference between them is

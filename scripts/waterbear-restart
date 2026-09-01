@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+# waterbear-restart — roll a running session onto the current binary.
+#
+# The gap this fills (#35): `claude update` never touches running clients, so every body keeps
+# running the old binary (and the old model) until something restarts it, and the backend now
+# gates remote-control resume on a minimum client version, so version drift is an outage in
+# waiting, not cosmetic. The restart is cheap because the guard already does the hard part:
+# kill the CLIENT process in the tmux pane and the guard respawns the session on whatever
+# binary is installed now, resuming the same conversation. Never kill the guard, never kill by
+# a `*claude*` glob (that takes out the guard and every other body on the machine).
+set -u
+
+NAME=""
+LIST=0
+DRY=0
+FORCE_SELF=0
+for a in "$@"; do
+  case "$a" in
+    --list)    LIST=1 ;;
+    --dry-run) DRY=1 ;;
+    --self)    FORCE_SELF=1 ;;
+    -h|--help) NAME="" ; LIST=0; break ;;
+    -*)        echo "waterbear-restart: unknown flag $a" >&2; exit 1 ;;
+    *)         NAME="$a" ;;
+  esac
+done
+
+if [ -z "$NAME" ] && [ "$LIST" -ne 1 ]; then
+  cat <<'EOF'
+usage: waterbear-restart <name> [--self] [--dry-run]
+       waterbear-restart --list
+
+  <name>     restart one body: idle-gate, kill its client (never the guard), then verify the
+             guard brought it back on the installed binary with remote control registered.
+             refuses a busy composer or an in-flight turn; come back to it.
+  --list     the drift report: every body, running client version vs installed binary.
+  --self     allow restarting the body you are running inside (this shell dies mid-command;
+             the guard resumes the conversation, your current turn does not survive).
+  --dry-run  print the plan.
+
+rolling several bodies: canary one, watch it resume end to end, then the rest, your own last.
+the verb stays single-target on purpose; the loop is yours.
+EOF
+  exit 0
+fi
+
+USER_NAME="$(id -un)"
+INSTALLED="$(claude --version 2>/dev/null | awk '{print $1}')"
+
+bodies() { launchctl list 2>/dev/null | sed -n "s/.*com\.${USER_NAME}\.claude-rc\.//p"; }
+pane_pid() { tmux list-panes -t "$1" -F '#{pane_pid}' 2>/dev/null | head -1; }
+pane_ver() { tmux list-panes -t "$1" -F '#{pane_current_command}' 2>/dev/null | head -1; }
+
+# composer + turn state from the pane, ghost-aware. the client renders autocomplete as a FAINT
+# span (SGR 2) after the prompt; a plain capture strips the styling that is the only thing
+# telling render-only ghost text from real queued input, so capture WITH escapes and drop the
+# faint spans before judging. "Press up to edit queued messages" is the 2.1.257 placeholder
+# for an empty composer with queued input behind it: empty for typing purposes, but the
+# turn-state check below still refuses to kill mid-turn.
+composer_idle() {
+  local nbsp esc
+  nbsp="$(printf '\302\240')"; esc="$(printf '\033')"
+  tmux capture-pane -pe -t "$1" 2>/dev/null | awk -v nb="$nbsp" -v esc="$esc" '
+    { gsub(nb, " ") }
+    { gsub(esc "\\[([0-9]+;)*2(;[0-9]+)*m[^" esc "]*", "") }
+    { gsub(esc "\\[[0-9;]*[A-Za-z]", "") }
+    /^[[:space:]]*(>|❯)([[:space:]]|$)/ { l = $0; f = 1 }
+    END {
+      if (!f) exit 1
+      sub(/^[[:space:]]*(>|❯)[[:space:]]*/, "", l); sub(/[[:space:]]+$/, "", l)
+      if (l == "" || l ~ /^Try "/ || l ~ /^Press up to edit queued messages$/) exit 0
+      exit 1
+    }'
+}
+turn_in_flight() { tmux capture-pane -p -t "$1" 2>/dev/null | grep -q 'esc to interrupt'; }
+rc_failed()      { tmux capture-pane -p -t "$1" 2>/dev/null | grep -v '^$' | tail -3 | grep -q '/rc failed'; }
+
+if [ "$LIST" -eq 1 ]; then
+  echo "installed binary: ${INSTALLED:-unknown}"
+  for b in $(bodies); do
+    v="$(pane_ver "$b")"; p="$(pane_pid "$b")"
+    state=idle
+    if ! tmux has-session -t "$b" 2>/dev/null; then state="no session"
+    elif turn_in_flight "$b"; then state="turn in flight"
+    elif ! composer_idle "$b"; then state="composer busy"; fi
+    flag=""; [ -n "$v" ] && [ "$v" != "$INSTALLED" ] && flag="  DRIFT"
+    rc_failed "$b" && flag="$flag  RC-FAILED"
+    printf '  %-10s pid %-6s running %-10s %s%s\n' "$b" "${p:-?}" "${v:-?}" "$state" "$flag"
+  done
+  exit 0
+fi
+
+# refuse self unless deliberate: killing your own client ends this shell and the turn it is in.
+if [ -n "${TMUX:-}" ] && [ "$FORCE_SELF" -ne 1 ]; then
+  MY_SESSION="$(tmux display -p '#{session_name}' 2>/dev/null || echo '')"
+  if [ "$MY_SESSION" = "$NAME" ]; then
+    echo "refusing: '$NAME' is the session you are running inside. pass --self if you mean it." >&2
+    exit 2
+  fi
+fi
+
+launchctl list "com.${USER_NAME}.claude-rc.${NAME}" >/dev/null 2>&1 || {
+  echo "waterbear-restart: no guard loaded for '$NAME' (launchctl knows no com.${USER_NAME}.claude-rc.${NAME})" >&2; exit 1; }
+tmux has-session -t "$NAME" 2>/dev/null || {
+  echo "waterbear-restart: guard is loaded but no tmux session '$NAME'; nothing to restart, the guard should be respawning it" >&2; exit 1; }
+
+bounce() { # kill the client, wait for a NEW pid on the INSTALLED version. returns 1 on timeout.
+  local old new ver i
+  old="$(pane_pid "$NAME")"
+  [ "$DRY" -eq 1 ] && { echo "  would: kill $old (the client in tmux pane '$NAME'), then wait for the guard's respawn"; return 0; }
+  echo "  kill $old"
+  kill "$old" 2>/dev/null || true
+  i=0
+  while [ "$i" -lt 30 ]; do
+    sleep 3; i=$((i+1))
+    new="$(pane_pid "$NAME")"; ver="$(pane_ver "$NAME")"
+    if [ -n "$new" ] && [ "$new" != "$old" ] && [ "$ver" = "$INSTALLED" ]; then
+      echo "  back: pid $old -> $new, running $ver"
+      return 0
+    fi
+  done
+  echo "waterbear-restart: killed $old but no new pane on $INSTALLED after 90s. read the guard before reloading anything: launchctl print gui/$(id -u)/com.${USER_NAME}.claude-rc.${NAME}" >&2
+  return 1
+}
+
+# idle gate. a busy composer holds unsent text the kill would eat; an in-flight turn is work
+# the kill would lose. both are the operator's call, so refuse rather than --force.
+if turn_in_flight "$NAME"; then
+  echo "waterbear-restart: '$NAME' has a turn in flight (esc to interrupt on screen). retry when it settles." >&2; exit 3
+fi
+if ! composer_idle "$NAME"; then
+  echo "waterbear-restart: '$NAME' composer holds input (or the pane is unreadable). handle by hand, retry after." >&2; exit 3
+fi
+
+was="$(pane_ver "$NAME")"
+echo "waterbear-restart: $NAME running ${was:-?}, installed ${INSTALLED:-?}"
+bounce || exit 1
+[ "$DRY" -eq 1 ] && exit 0
+
+# verify the effect, not the declaration. the session resumes fine even when remote-control
+# registration fails (it does during a desktop-app update window: "/rc failed" in the status
+# bar), and a body without rc is invisible from every remote surface. one automatic re-bounce
+# covers the common case; a second failure is a real finding, stop and read.
+sleep 10
+if rc_failed "$NAME"; then
+  echo "  remote control did not register on the way up, bouncing once more"
+  bounce || exit 1
+  sleep 10
+  if rc_failed "$NAME"; then
+    echo "waterbear-restart: '$NAME' is up on $INSTALLED but remote control failed twice. type /rc in that session, or read /tmp/com.${USER_NAME}.claude-rc.${NAME}.err" >&2
+    exit 4
+  fi
+fi
+echo "waterbear-restart: $NAME is up on $INSTALLED with remote control registered, resuming its conversation."
