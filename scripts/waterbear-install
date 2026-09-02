@@ -23,7 +23,7 @@
 #                    internal id: names the tmux session, the launchd label, and the id file.
 #                    keep it short + space-free (it goes in a launchd label + `tmux -t`).
 #   CLAUDE_RC_TITLE  display title in the session list (phone/desktop/claude.ai). default: NAME.
-#                    decoupled from NAME so it can be pretty (e.g. "Roy - Theaetetus") while the
+#                    decoupled from NAME so it can be pretty (e.g. "Max - Ops") while the
 #                    internal name stays short. cosmetic , resume keys on the id, not the title.
 #   CLAUDE_RC_DIR    working dir for the session   (default: $HOME)
 #   CLAUDE_RC_WAKE   optional first prompt to auto-run on a FRESH (re)spawn (default: none).
@@ -750,7 +750,10 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
               END {
                 if (!f) exit 1
                 sub(/^[[:space:]]*(>|❯)[[:space:]]*/, "", l); sub(/[[:space:]]+$/, "", l)
-                if (l == "" || l ~ /^Try "/) exit 0
+                # "Press up to edit queued messages" is the 2.1.257+ placeholder for an
+                # empty composer with queued input behind it: typing into it just queues,
+                # so it is empty for delivery purposes (#35)
+                if (l == "" || l ~ /^Try "/ || l ~ /^Press up to edit queued messages$/) exit 0
                 exit 1
               }'; then pane_ok=1; fi
         fi
