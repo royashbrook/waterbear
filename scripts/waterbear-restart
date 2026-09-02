@@ -49,6 +49,9 @@ INSTALLED="$(claude --version 2>/dev/null | awk '{print $1}')"
 
 bodies() { launchctl list 2>/dev/null | sed -n "s/.*com\.${USER_NAME}\.claude-rc\.//p"; }
 pane_pid() { tmux list-panes -t "$1" -F '#{pane_pid}' 2>/dev/null | head -1; }
+# pane_current_command IS the version only because the native installer names the binary by
+# version (~/.local/share/claude/versions/2.1.257 runs as process name "2.1.257"). an npm or
+# brew install reports "node"/"claude" here and every body reads as DRIFT (tracked in #39).
 pane_ver() { tmux list-panes -t "$1" -F '#{pane_current_command}' 2>/dev/null | head -1; }
 
 # composer + turn state from the pane, ghost-aware. the client renders autocomplete as a FAINT
