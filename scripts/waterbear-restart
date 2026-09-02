@@ -109,6 +109,16 @@ rc_reset() {
     echo "waterbear-restart: '$NAME' did not show the /rc menu within 20s. clear its composer (Esc) and retry." >&2
     return 1
   fi
+  # the menu prints the CURRENT registration's url, which is the only reliable place to read it:
+  # on an idle body the launch-time line scrolled off the visible pane long ago. read it here,
+  # while the menu is up, so the changed-url gate after the bounce compares against something real.
+  old_url="$(rc_url "$NAME")"
+  if [ -z "$old_url" ]; then
+    echo "waterbear-restart: /rc menu is up in '$NAME' but shows no session url; not disconnecting blind. read the pane." >&2
+    tmux send-keys -t "$NAME" Escape
+    return 1
+  fi
+  echo "  current registration: $old_url"
   # menu order: Disconnect this session / Show QR code / Continue (cursor starts on Continue)
   tmux send-keys -t "$NAME" Up Up; sleep 1; tmux send-keys -t "$NAME" Enter
   if ! wait_for_text "$NAME" 'Remote Control disconnected' 10; then
@@ -179,8 +189,7 @@ was="$(pane_ver "$NAME")"
 echo "waterbear-restart: $NAME running ${was:-?}, installed ${INSTALLED:-?}"
 old_url=""
 if [ "$RC_RESET" -eq 1 ]; then
-  old_url="$(rc_url "$NAME")"
-  rc_reset || exit 5
+  rc_reset || exit 5   # sets old_url from the /rc menu
 fi
 bounce || exit 1
 [ "$DRY" -eq 1 ] && exit 0
@@ -202,10 +211,10 @@ fi
 if [ "$RC_RESET" -eq 1 ]; then
   wait_for_text "$NAME" 'remote-control is active' 60 || true
   new_url="$(rc_url "$NAME")"
-  if [ -n "$new_url" ] && [ "$new_url" != "$old_url" ]; then
-    echo "  remote control re-registered: ${old_url:-none} -> $new_url"
+  if [ -n "$new_url" ] && [ -n "$old_url" ] && [ "$new_url" != "$old_url" ]; then
+    echo "  remote control re-registered: $old_url -> $new_url"
   else
-    echo "waterbear-restart: '$NAME' came back but its remote-control url did not change (${new_url:-none}). the reset did not take; read the pane." >&2
+    echo "waterbear-restart: '$NAME' came back but the remote-control url did not change (was ${old_url:-unread}, now ${new_url:-none}). the reset did not take; read the pane." >&2
     exit 5
   fi
 fi
