@@ -14,11 +14,13 @@ NAME=""
 LIST=0
 DRY=0
 FORCE_SELF=0
+RC_RESET=0
 for a in "$@"; do
   case "$a" in
     --list)    LIST=1 ;;
     --dry-run) DRY=1 ;;
     --self)    FORCE_SELF=1 ;;
+    --rc)      RC_RESET=1 ;;
     -h|--help) NAME="" ; LIST=0; break ;;
     -*)        echo "waterbear-restart: unknown flag $a" >&2; exit 1 ;;
     *)         NAME="$a" ;;
@@ -27,12 +29,19 @@ done
 
 if [ -z "$NAME" ] && [ "$LIST" -ne 1 ]; then
   cat <<'EOF'
-usage: waterbear-restart <name> [--self] [--dry-run]
+usage: waterbear-restart <name> [--rc] [--self] [--dry-run]
        waterbear-restart --list
 
   <name>     restart one body: idle-gate, kill its client (never the guard), then verify the
              guard brought it back on the installed binary with remote control registered.
              refuses a busy composer or an in-flight turn; come back to it.
+  --rc       reset remote control on the way: disconnect the current registration first, so
+             the relaunch mints a fresh one under the body's title. for a body the remote
+             surfaces list but cannot reach AFTER a plain restart did not bring it back: the
+             fresh registration is a new, empty chat on the remote side (the conversation
+             itself survives, in tmux and the transcript). a bare /rc typed into the session
+             re-registers under an auto-generated name, and a resume reuses whatever
+             registration the transcript holds, so this is the one order that keeps the title.
   --list     the drift report: every body, running client version vs installed binary.
   --self     allow restarting the body you are running inside (this shell dies mid-command;
              the guard resumes the conversation, your current turn does not survive).
@@ -77,6 +86,47 @@ composer_idle() {
 }
 turn_in_flight() { tmux capture-pane -p -t "$1" 2>/dev/null | grep -q 'esc to interrupt'; }
 rc_failed()      { tmux capture-pane -p -t "$1" 2>/dev/null | grep -v '^$' | tail -3 | grep -q '/rc failed'; }
+rc_url()         { tmux capture-pane -p -t "$1" 2>/dev/null | grep -oE 'https://claude\.ai/code/session_[A-Za-z0-9]+' | tail -1; }
+wait_for_text()  { # $1 = session, $2 = grep pattern, $3 = seconds. returns 1 on timeout.
+  local i=0
+  while [ "$i" -lt "$3" ]; do
+    tmux capture-pane -p -t "$1" 2>/dev/null | grep -q "$2" && return 0
+    sleep 1; i=$((i+1))
+  done
+  return 1
+}
+
+# disconnect the live remote-control registration through the client's own /rc menu, so the
+# relaunch that follows creates a fresh one under the launch title. the session keeps its
+# stored registration across a resume, and a bare /rc after a disconnect registers under an
+# auto-generated name (hostname prefix), which is why "disconnect, then bounce" is the only
+# order that ends with the right name on the remote surfaces. every step is verified on screen.
+rc_reset() {
+  [ "$DRY" -eq 1 ] && { echo "  would: open /rc in '$NAME', choose Disconnect, confirm 'Remote Control disconnected' on screen"; return 0; }
+  echo "  /rc menu -> Disconnect"
+  tmux send-keys -t "$NAME" -l '/rc'; tmux send-keys -t "$NAME" Enter
+  if ! wait_for_text "$NAME" 'Disconnect this session' 20; then
+    echo "waterbear-restart: '$NAME' did not show the /rc menu within 20s. clear its composer (Esc) and retry." >&2
+    return 1
+  fi
+  # the menu prints the CURRENT registration's url, which is the only reliable place to read it:
+  # on an idle body the launch-time line scrolled off the visible pane long ago. read it here,
+  # while the menu is up, so the changed-url gate after the bounce compares against something real.
+  old_url="$(rc_url "$NAME")"
+  if [ -z "$old_url" ]; then
+    echo "waterbear-restart: /rc menu is up in '$NAME' but shows no session url; not disconnecting blind. read the pane." >&2
+    tmux send-keys -t "$NAME" Escape
+    return 1
+  fi
+  echo "  current registration: $old_url"
+  # menu order: Disconnect this session / Show QR code / Continue (cursor starts on Continue)
+  tmux send-keys -t "$NAME" Up Up; sleep 1; tmux send-keys -t "$NAME" Enter
+  if ! wait_for_text "$NAME" 'Remote Control disconnected' 10; then
+    echo "waterbear-restart: chose Disconnect in '$NAME' but the client never confirmed. read the pane before going on." >&2
+    return 1
+  fi
+  echo "  disconnected"
+}
 
 if [ "$LIST" -eq 1 ]; then
   echo "installed binary: ${INSTALLED:-unknown}"
@@ -137,6 +187,10 @@ fi
 
 was="$(pane_ver "$NAME")"
 echo "waterbear-restart: $NAME running ${was:-?}, installed ${INSTALLED:-?}"
+old_url=""
+if [ "$RC_RESET" -eq 1 ]; then
+  rc_reset || exit 5   # sets old_url from the /rc menu
+fi
 bounce || exit 1
 [ "$DRY" -eq 1 ] && exit 0
 
@@ -152,6 +206,16 @@ if rc_failed "$NAME"; then
   if rc_failed "$NAME"; then
     echo "waterbear-restart: '$NAME' is up on $INSTALLED but remote control failed twice. type /rc in that session, or read /tmp/com.${USER_NAME}.claude-rc.${NAME}.err" >&2
     exit 4
+  fi
+fi
+if [ "$RC_RESET" -eq 1 ]; then
+  wait_for_text "$NAME" 'remote-control is active' 60 || true
+  new_url="$(rc_url "$NAME")"
+  if [ -n "$new_url" ] && [ -n "$old_url" ] && [ "$new_url" != "$old_url" ]; then
+    echo "  remote control re-registered: $old_url -> $new_url"
+  else
+    echo "waterbear-restart: '$NAME' came back but the remote-control url did not change (was ${old_url:-unread}, now ${new_url:-none}). the reset did not take; read the pane." >&2
+    exit 5
   fi
 fi
 echo "waterbear-restart: $NAME is up on $INSTALLED with remote control registered, resuming its conversation."

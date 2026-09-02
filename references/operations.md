@@ -150,6 +150,7 @@ moment, not cosmetic. The restart is cheap because the guard already does the ha
 ```sh
 scripts/waterbear-restart --list     # per body: running client version vs installed binary
 scripts/waterbear-restart <name>     # idle-gate, kill the CLIENT, verify the respawn
+scripts/waterbear-restart <name> --rc  # same, after disconnecting a dead remote-control registration
 ```
 
 It kills the client process in the tmux pane, never the guard and never by a `*claude*` glob
@@ -161,6 +162,21 @@ the effect, not the declaration: a new pid, the running version equal to the ins
 remote control actually registered. Registration can fail on the way up during a desktop-app
 update window (`/rc failed` in the status bar) while the session itself resumes fine, so the verb
 re-bounces once for that and stops with a real finding if it fails twice.
+
+A body the remote surfaces list but cannot reach ("unable to reach the computer" in the desktop
+app, while the session is idle and healthy in tmux) is a registration problem, and the cost of
+each fix is different, so take them in order. First a plain `scripts/waterbear-restart <name>`:
+the session keeps its stored registration across a resume, so if the remote side merely lost
+the connection this brings it back with the desktop chat history intact. Only if it is still
+unreachable after that, `scripts/waterbear-restart <name> --rc`: disconnect the registration
+through the client's own `/rc` menu, then bounce, so the guard's titled relaunch mints a fresh
+one. That costs the remote-side history: the desktop keys its chat on the registration, so the
+body shows up as a new, empty chat under its usual title (the conversation itself is intact, in
+the tmux scrollback and the transcript). Two wrong turns are easy to take by hand and the verb
+exists to avoid them. Typing a bare `/rc` into the session registers it again under an
+auto-generated name (hostname prefix), so the title is gone and the remote list shows a stranger;
+restarting after that keeps the stranger, because the resume reuses it. `--rc` verifies each step
+on screen and refuses to call it done unless the remote-control url actually changed.
 
 Rolling several bodies is the operator's loop, on purpose: restart one as the canary, watch it
 resume end to end, then the rest, and the body you are working from last (`--self`, and your
