@@ -192,7 +192,11 @@ shared guard file by rename (never in place), so guards already running keep the
 with; to move a running guard onto a new guard file, `launchctl kickstart -k` its label. The guard
 adopts an existing tmux session on start and resumes the doorbell offset from its sibling file, so
 the session is untouched. Do it one guard at a time and verify the effect: new guard pid, same
-pane pid.
+pane pid, and then the one that matters: a ring delivered. Write a test line to the body's signal
+file and watch its sibling `.offset` advance within a minute. A rolled guard can come up healthy
+by every other observable (pid, launchd state, empty error log) and never deliver again; on one
+body the offset sat still for eleven hours after a roll while twenty rings queued, and only the
+offset said so. "Sent a proof ring" is not a proof; the offset moving is.
 
 Rolling several bodies is the operator's loop, on purpose: restart one as the canary, watch it
 resume end to end, then the rest, and the body you are working from last (`--self`, and your

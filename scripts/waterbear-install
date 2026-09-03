@@ -612,19 +612,22 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
   # the guard hands it over on the way in, prefixed to the wake, and consumes it (one-shot) so it
   # cannot be re-read as a new event on a later, real crash. a death with NO note beside it is a
   # real crash. same lever as the failed-resume NOTE above: tell the body its own situation first.
-  # CONSUMED UNCONDITIONALLY, and honored only when FRESH (600s): a note left behind by a body that
-  # takes no wake prompt, or by a restart that never came back, would otherwise sit there and
-  # label the next REAL crash "deliberate", inverting the feature. stale or empty = read as absent.
+  # CONSUMED UNCONDITIONALLY (the one-shot is what keeps a stranded note from labeling a later
+  # real crash "deliberate"), and honored at ANY age with the age stated, never gated on it: a
+  # restart during a network outage writes the note, then the launch gate above waits up to an
+  # hour for connectivity, so a freshness window would drop exactly the note the operator is not
+  # there to replace. a body can weigh "47m ago" for itself; a silently withheld note cannot.
   RESTART_NOTE="$HOME/.claude/rc-restart-$NAME"
   if [ -e "$RESTART_NOTE" ]; then
-    note=""
-    note_at=$(stat -f %m "$RESTART_NOTE" 2>/dev/null || echo 0)
-    if [ -s "$RESTART_NOTE" ] && [ $(( $(date +%s) - note_at )) -le 600 ]; then
+    note=""; age=""
+    if [ -s "$RESTART_NOTE" ]; then
       note="$(head -n1 "$RESTART_NOTE" | tr -d '\n')"
+      note_at=$(stat -f %m "$RESTART_NOTE" 2>/dev/null || echo 0)
+      age=$(( ( $(date +%s) - note_at ) / 60 ))
     fi
     rm -f "$RESTART_NOTE"
     if [ -n "$note" ] && [ -n "$NUDGE" ]; then
-      NUDGE="NOTE: this session was restarted on purpose ($note). not a crash, nothing to investigate. ${NUDGE}"
+      NUDGE="NOTE: this session was restarted on purpose ${age}m ago ($note). not a crash, nothing to investigate. ${NUDGE}"
     fi
   fi
   # launchd has no hands. if a prompt is set, type it into the session once its UI has settled
@@ -784,6 +787,10 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
               }'; then pane_ok=1; fi
         fi
         [ "$pane_ok" -eq 1 ] || break                        # busy/unreadable: retry next tick
+        # a signed ring carries a trailing ` sig:<...>` (~300 chars of base64) that no session
+        # should read: receivers verify from the signal-file line by id, so strip it before the
+        # slice. otherwise the signature eats the 400-char budget and the model's tokens for nothing.
+        line="${line% sig:*}"
         msg=$(printf '%s' "$line" | cut -c1-400)
         [ ${#line} -gt 400 ] && msg="$msg (truncated, full line in the signal file)"
         # BOUNDED (see `bounded` above): a send that HANGS is treated as the send-FAILED
