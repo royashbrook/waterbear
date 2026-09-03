@@ -420,7 +420,12 @@ mkdir -p "$BIN_DIR" "$HOME/Library/LaunchAgents"
 
 # --- the keepalive guard: ensure the session is alive, block while it lives, exit when it
 #     dies so launchd KeepAlive respawns us (which recreates it). ---
-cat > "$GUARD" <<'GUARD_EOF'
+# write to a sibling and rename: `cat > "$GUARD"` truncates IN PLACE (same inode), and a running
+# bash reads its script by byte offset from an open fd, so every guard already running on this
+# machine would execute the new file at its old offsets the moment its watch loop exits. rename
+# gives a NEW inode: running guards keep the file they started with and pick up this one on their
+# next launchd start (tested: in-place rewrite ran a garbage fragment, rename ran clean).
+cat > "$GUARD.new" <<'GUARD_EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 NAME="${CLAUDE_RC_NAME:-claude}"
@@ -600,6 +605,17 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
       # its own situation before it acts on an identity prompt
       NUDGE="NOTE: a resume was intended and failed, so this is a FRESH session, not a continuation. Do not assume prior context exists, and do not relocate or reconfigure anything until the human confirms. ${WAKE}"
     fi
+  fi
+  # RESTART TRAIL: a deliberate restart (waterbear-restart) and a crash look identical from inside
+  # the resumed body, and a body that cannot tell them apart spends its afternoon hunting a crash
+  # that was an operator. the restart verb leaves one line in rc-restart-$NAME (who, when, why);
+  # the guard hands it over on the way in, prefixed to the wake, and consumes it (one-shot) so it
+  # cannot be re-read as a new event on a later, real crash. a death with NO note beside it is a
+  # real crash. same lever as the failed-resume NOTE above: tell the body its own situation first.
+  RESTART_NOTE="$HOME/.claude/rc-restart-$NAME"
+  if [ -n "$NUDGE" ] && [ -s "$RESTART_NOTE" ]; then
+    NUDGE="NOTE: this session was restarted on purpose ($(head -n1 "$RESTART_NOTE" | tr -d '\n')). not a crash, nothing to investigate. ${NUDGE}"
+    rm -f "$RESTART_NOTE"
   fi
   # launchd has no hands. if a prompt is set, type it into the session once its UI has settled
   # (drawn the input box), so a respawn comes up as itself, not a blank assistant. a positional
@@ -810,7 +826,8 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
 done
 exit 0
 GUARD_EOF
-chmod +x "$GUARD"
+chmod +x "$GUARD.new"
+mv -f "$GUARD.new" "$GUARD"
 
 # --- the LaunchAgent ---
 cat > "$PLIST" <<PLIST_EOF

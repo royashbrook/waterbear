@@ -178,6 +178,22 @@ auto-generated name (hostname prefix), so the title is gone and the remote list 
 restarting after that keeps the stranger, because the resume reuses it. `--rc` verifies each step
 on screen and refuses to call it done unless the remote-control url actually changed.
 
+Every restart leaves a trail. The verb writes one line to `~/.claude/rc-restart-<name>` (who,
+when, why; `--why "…"` sets the reason, otherwise a default that names the operation) before the
+kill, and the guard prefixes it to the wake it types into the resumed session, then deletes it.
+The body comes back knowing it was restarted on purpose. Without that line, a deliberate bounce
+and a crash are the same event from inside: a body that got bounced twice in three minutes spent
+its afternoon eliminating crash causes, because the only evidence it had was two clean
+re-registrations. A death with no note beside it is a real crash, which is what makes the note
+worth anything.
+
+Rolling the guard itself is a different operation from rolling a body. The installer writes the
+shared guard file by rename (never in place), so guards already running keep the file they started
+with; to move a running guard onto a new guard file, `launchctl kickstart -k` its label. The guard
+adopts an existing tmux session on start and resumes the doorbell offset from its sibling file, so
+the session is untouched. Do it one guard at a time and verify the effect: new guard pid, same
+pane pid.
+
 Rolling several bodies is the operator's loop, on purpose: restart one as the canary, watch it
 resume end to end, then the rest, and the body you are working from last (`--self`, and your
 current turn does not survive the kill).
