@@ -198,6 +198,14 @@ by every other observable (pid, launchd state, empty error log) and never delive
 body the offset sat still for eleven hours after a roll while twenty rings queued, and only the
 offset said so. "Sent a proof ring" is not a proof; the offset moving is.
 
+Before any of that, prove the fix is in the EXECUTING file, not just the source. An installed
+guard and the heredoc in `waterbear-install` can differ for a whole day while every check on the
+source passes (the fleet ran one fix stale that way; the diff was a single line). Two reads, both
+against the installed `claude-rc-keepalive`: grep the new code's marker in it (a string the fix
+introduced, not a line the old file also had), and confirm the guard's process start time is later
+than the file's mtime (`ps -o lstart= -p <guard pid>` against `stat -f %m`). A guard older than
+its file is still running the previous bytes, whatever the source says.
+
 Rolling several bodies is the operator's loop, on purpose: restart one as the canary, watch it
 resume end to end, then the rest, and the body you are working from last (`--self`, and your
 current turn does not survive the kill).
