@@ -612,10 +612,20 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
   # the guard hands it over on the way in, prefixed to the wake, and consumes it (one-shot) so it
   # cannot be re-read as a new event on a later, real crash. a death with NO note beside it is a
   # real crash. same lever as the failed-resume NOTE above: tell the body its own situation first.
+  # CONSUMED UNCONDITIONALLY, and honored only when FRESH (600s): a note left behind by a body that
+  # takes no wake prompt, or by a restart that never came back, would otherwise sit there and
+  # label the next REAL crash "deliberate", inverting the feature. stale or empty = read as absent.
   RESTART_NOTE="$HOME/.claude/rc-restart-$NAME"
-  if [ -n "$NUDGE" ] && [ -s "$RESTART_NOTE" ]; then
-    NUDGE="NOTE: this session was restarted on purpose ($(head -n1 "$RESTART_NOTE" | tr -d '\n')). not a crash, nothing to investigate. ${NUDGE}"
+  if [ -e "$RESTART_NOTE" ]; then
+    note=""
+    note_at=$(stat -f %m "$RESTART_NOTE" 2>/dev/null || echo 0)
+    if [ -s "$RESTART_NOTE" ] && [ $(( $(date +%s) - note_at )) -le 600 ]; then
+      note="$(head -n1 "$RESTART_NOTE" | tr -d '\n')"
+    fi
     rm -f "$RESTART_NOTE"
+    if [ -n "$note" ] && [ -n "$NUDGE" ]; then
+      NUDGE="NOTE: this session was restarted on purpose ($note). not a crash, nothing to investigate. ${NUDGE}"
+    fi
   fi
   # launchd has no hands. if a prompt is set, type it into the session once its UI has settled
   # (drawn the input box), so a respawn comes up as itself, not a blank assistant. a positional

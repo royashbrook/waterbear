@@ -33,7 +33,7 @@ done
 
 if [ -z "$NAME" ] && [ "$LIST" -ne 1 ]; then
   cat <<'EOF'
-usage: waterbear-restart <name> [--rc] [--self] [--dry-run]
+usage: waterbear-restart <name> [--rc] [--why "…"] [--self] [--dry-run]
        waterbear-restart --list
 
   <name>     restart one body: idle-gate, kill its client (never the guard), then verify the
@@ -172,7 +172,12 @@ bounce() { # kill the client, wait for a NEW pid on the INSTALLED version. retur
   [ "$DRY" -eq 1 ] && { echo "  would: write ~/.claude/rc-restart-${NAME}: ${WHY}"; echo "  would: kill $old (the client in tmux pane '$NAME'), then wait for the guard's respawn"; return 0; }
   # leave the trail BEFORE the kill: the body that comes back reads it in its wake (guard side),
   # and a kill that leaves no reason behind is indistinguishable from a crash to the one it hit.
-  printf '%s\n' "by ${USER_NAME}@$(hostname -s) at $(date '+%Y-%m-%dT%H:%M:%S') via waterbear-restart: ${WHY}" > "$HOME/.claude/rc-restart-${NAME}" 2>/dev/null || true
+  # fail CLOSED: no trail, no kill. "every restart leaves a reason" is the contract, and a silent
+  # write failure would quietly turn a deliberate bounce back into an unexplained death.
+  if ! printf '%s\n' "by ${USER_NAME}@$(hostname -s) at $(date '+%Y-%m-%dT%H:%M:%S') via waterbear-restart: ${WHY}" > "$HOME/.claude/rc-restart-${NAME}"; then
+    echo "waterbear-restart: cannot write ~/.claude/rc-restart-${NAME}; refusing to kill without a trail" >&2
+    return 1
+  fi
   echo "  kill $old"
   kill "$old" 2>/dev/null || true
   i=0
