@@ -6,6 +6,7 @@
 # greps the installer for it so the two cannot drift apart silently.
 set -u
 INSTALL="$(dirname "$0")/waterbear-install"
+# shellcheck disable=SC2016  # literal on purpose: this is the guard's source text, grepped verbatim
 expr='[[ "$line" =~ ^(.*)\ sig:[^[:space:]]+$ ]] && line="${BASH_REMATCH[1]}"'
 grep -qF "$expr" "$INSTALL" || { echo "check-ring-strip: the guard no longer carries the tested strip expression; update this check with it" >&2; exit 1; }
 strip() { local line="$1"; [[ "$line" =~ ^(.*)\ sig:[^[:space:]]+$ ]] && line="${BASH_REMATCH[1]}"; printf '%s' "$line"; }
