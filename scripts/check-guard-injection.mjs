@@ -34,7 +34,7 @@ const vars = stripLine[1].trim().split(/\s+/);
 if (vars.length < 7) fail(`ambient-strip list suspiciously short: ${vars.join(" ")}`);
 
 // the guard heredoc
-const guard = install.match(/^cat > "\$GUARD" <<'GUARD_EOF'$([\s\S]*?)^GUARD_EOF$/m);
+const guard = install.match(/^cat > "\$GUARD(?:\.new)?" <<'GUARD_EOF'$([\s\S]*?)^GUARD_EOF$/m);
 if (!guard) fail("cannot find the GUARD_EOF heredoc in waterbear-install");
 
 // every `tmux new-session` in the guard, with backslash continuations joined

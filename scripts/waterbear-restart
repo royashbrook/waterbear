@@ -15,12 +15,16 @@ LIST=0
 DRY=0
 FORCE_SELF=0
 RC_RESET=0
+WHY=""
+want_why=0
 for a in "$@"; do
+  if [ "$want_why" -eq 1 ]; then WHY="$a"; want_why=0; continue; fi
   case "$a" in
     --list)    LIST=1 ;;
     --dry-run) DRY=1 ;;
     --self)    FORCE_SELF=1 ;;
     --rc)      RC_RESET=1 ;;
+    --why)     want_why=1 ;;
     -h|--help) NAME="" ; LIST=0; break ;;
     -*)        echo "waterbear-restart: unknown flag $a" >&2; exit 1 ;;
     *)         NAME="$a" ;;
@@ -29,7 +33,7 @@ done
 
 if [ -z "$NAME" ] && [ "$LIST" -ne 1 ]; then
   cat <<'EOF'
-usage: waterbear-restart <name> [--rc] [--self] [--dry-run]
+usage: waterbear-restart <name> [--rc] [--why "…"] [--self] [--dry-run]
        waterbear-restart --list
 
   <name>     restart one body: idle-gate, kill its client (never the guard), then verify the
@@ -45,6 +49,11 @@ usage: waterbear-restart <name> [--rc] [--self] [--dry-run]
   --list     the drift report: every body, running client version vs installed binary.
   --self     allow restarting the body you are running inside (this shell dies mid-command;
              the guard resumes the conversation, your current turn does not survive).
+  --why "…"  the reason, left for the body. every restart writes one line to
+             ~/.claude/rc-restart-<name> (who, when, why) and the guard prefixes it to the wake,
+             so the resumed body knows it was restarted on purpose instead of hunting a crash.
+             default reasons: "roll onto installed binary", or "reset remote-control
+             registration" with --rc.
   --dry-run  print the plan.
 
 rolling several bodies: canary one, watch it resume end to end, then the rest, your own last.
@@ -160,7 +169,15 @@ tmux has-session -t "$NAME" 2>/dev/null || {
 bounce() { # kill the client, wait for a NEW pid on the INSTALLED version. returns 1 on timeout.
   local old new ver i
   old="$(pane_pid "$NAME")"
-  [ "$DRY" -eq 1 ] && { echo "  would: kill $old (the client in tmux pane '$NAME'), then wait for the guard's respawn"; return 0; }
+  [ "$DRY" -eq 1 ] && { echo "  would: write ~/.claude/rc-restart-${NAME}: ${WHY}"; echo "  would: kill $old (the client in tmux pane '$NAME'), then wait for the guard's respawn"; return 0; }
+  # leave the trail BEFORE the kill: the body that comes back reads it in its wake (guard side),
+  # and a kill that leaves no reason behind is indistinguishable from a crash to the one it hit.
+  # fail CLOSED: no trail, no kill. "every restart leaves a reason" is the contract, and a silent
+  # write failure would quietly turn a deliberate bounce back into an unexplained death.
+  if ! printf '%s\n' "by ${USER_NAME}@$(hostname -s) at $(date '+%Y-%m-%dT%H:%M:%S') via waterbear-restart: ${WHY}" > "$HOME/.claude/rc-restart-${NAME}"; then
+    echo "waterbear-restart: cannot write ~/.claude/rc-restart-${NAME}; refusing to kill without a trail" >&2
+    return 1
+  fi
   echo "  kill $old"
   kill "$old" 2>/dev/null || true
   i=0
@@ -186,6 +203,9 @@ if ! composer_idle "$NAME"; then
 fi
 
 was="$(pane_ver "$NAME")"
+if [ -z "$WHY" ]; then
+  if [ "$RC_RESET" -eq 1 ]; then WHY="reset remote-control registration"; else WHY="roll onto installed binary ${INSTALLED:-?}"; fi
+fi
 echo "waterbear-restart: $NAME running ${was:-?}, installed ${INSTALLED:-?}"
 old_url=""
 if [ "$RC_RESET" -eq 1 ]; then

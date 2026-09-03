@@ -420,7 +420,12 @@ mkdir -p "$BIN_DIR" "$HOME/Library/LaunchAgents"
 
 # --- the keepalive guard: ensure the session is alive, block while it lives, exit when it
 #     dies so launchd KeepAlive respawns us (which recreates it). ---
-cat > "$GUARD" <<'GUARD_EOF'
+# write to a sibling and rename: `cat > "$GUARD"` truncates IN PLACE (same inode), and a running
+# bash reads its script by byte offset from an open fd, so every guard already running on this
+# machine would execute the new file at its old offsets the moment its watch loop exits. rename
+# gives a NEW inode: running guards keep the file they started with and pick up this one on their
+# next launchd start (tested: in-place rewrite ran a garbage fragment, rename ran clean).
+cat > "$GUARD.new" <<'GUARD_EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 NAME="${CLAUDE_RC_NAME:-claude}"
@@ -601,6 +606,30 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
       NUDGE="NOTE: a resume was intended and failed, so this is a FRESH session, not a continuation. Do not assume prior context exists, and do not relocate or reconfigure anything until the human confirms. ${WAKE}"
     fi
   fi
+  # RESTART TRAIL: a deliberate restart (waterbear-restart) and a crash look identical from inside
+  # the resumed body, and a body that cannot tell them apart spends its afternoon hunting a crash
+  # that was an operator. the restart verb leaves one line in rc-restart-$NAME (who, when, why);
+  # the guard hands it over on the way in, prefixed to the wake, and consumes it (one-shot) so it
+  # cannot be re-read as a new event on a later, real crash. a death with NO note beside it is a
+  # real crash. same lever as the failed-resume NOTE above: tell the body its own situation first.
+  # CONSUMED UNCONDITIONALLY (the one-shot is what keeps a stranded note from labeling a later
+  # real crash "deliberate"), and honored at ANY age with the age stated, never gated on it: a
+  # restart during a network outage writes the note, then the launch gate above waits up to an
+  # hour for connectivity, so a freshness window would drop exactly the note the operator is not
+  # there to replace. a body can weigh "47m ago" for itself; a silently withheld note cannot.
+  RESTART_NOTE="$HOME/.claude/rc-restart-$NAME"
+  if [ -e "$RESTART_NOTE" ]; then
+    note=""; age=""
+    if [ -s "$RESTART_NOTE" ]; then
+      note="$(head -n1 "$RESTART_NOTE" | tr -d '\n')"
+      note_at=$(stat -f %m "$RESTART_NOTE" 2>/dev/null || echo 0)
+      age=$(( ( $(date +%s) - note_at ) / 60 ))
+    fi
+    rm -f "$RESTART_NOTE"
+    if [ -n "$note" ] && [ -n "$NUDGE" ]; then
+      NUDGE="NOTE: this session was restarted on purpose ${age}m ago ($note). not a crash, nothing to investigate. ${NUDGE}"
+    fi
+  fi
   # launchd has no hands. if a prompt is set, type it into the session once its UI has settled
   # (drawn the input box), so a respawn comes up as itself, not a blank assistant. a positional
   # prompt does NOT auto-run in interactive mode and under --remote-control is read as a session
@@ -758,6 +787,12 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
               }'; then pane_ok=1; fi
         fi
         [ "$pane_ok" -eq 1 ] || break                        # busy/unreadable: retry next tick
+        # a signed ring carries a trailing ` sig:<...>` (~300 chars of base64) that no session
+        # should read: receivers verify from the signal-file line by id, so strip it before the
+        # slice. otherwise the signature eats the 400-char budget and the model's tokens for nothing.
+        # only the FINAL whitespace-free field: a topic may legitimately contain " sig:" text on
+        # an unsigned line, and a suffix strip would eat it along with the at: field.
+        [[ "$line" =~ ^(.*)\ sig:[^[:space:]]+$ ]] && line="${BASH_REMATCH[1]}"
         msg=$(printf '%s' "$line" | cut -c1-400)
         [ ${#line} -gt 400 ] && msg="$msg (truncated, full line in the signal file)"
         # BOUNDED (see `bounded` above): a send that HANGS is treated as the send-FAILED
@@ -810,7 +845,8 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
 done
 exit 0
 GUARD_EOF
-chmod +x "$GUARD"
+chmod +x "$GUARD.new"
+mv -f "$GUARD.new" "$GUARD"
 
 # --- the LaunchAgent ---
 cat > "$PLIST" <<PLIST_EOF
