@@ -790,7 +790,9 @@ while tmux has-session -t "$NAME" 2>/dev/null; do
         # a signed ring carries a trailing ` sig:<...>` (~300 chars of base64) that no session
         # should read: receivers verify from the signal-file line by id, so strip it before the
         # slice. otherwise the signature eats the 400-char budget and the model's tokens for nothing.
-        line="${line% sig:*}"
+        # only the FINAL whitespace-free field: a topic may legitimately contain " sig:" text on
+        # an unsigned line, and a suffix strip would eat it along with the at: field.
+        [[ "$line" =~ ^(.*)\ sig:[^[:space:]]+$ ]] && line="${BASH_REMATCH[1]}"
         msg=$(printf '%s' "$line" | cut -c1-400)
         [ ${#line} -gt 400 ] && msg="$msg (truncated, full line in the signal file)"
         # BOUNDED (see `bounded` above): a send that HANGS is treated as the send-FAILED
