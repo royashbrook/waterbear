@@ -137,17 +137,26 @@ rc_reset() {
   echo "  disconnected"
 }
 
+# the model a body answers with is not in its plist or its pane: it is chosen in-session (/model)
+# and only the transcript records it, on every assistant turn. read the last real one.
+body_model() {
+  local sid f
+  sid="$(cat "$HOME/.claude/rc-session-$1" 2>/dev/null)"; [ -n "$sid" ] || return 0
+  f="$(ls "$HOME"/.claude/projects/*/"$sid".jsonl 2>/dev/null | head -1)"; [ -n "$f" ] || return 0
+  tail -c 400000 "$f" | grep -o '"model":"[^"<]*"' | tail -1 | cut -d'"' -f4
+}
+
 if [ "$LIST" -eq 1 ]; then
   echo "installed binary: ${INSTALLED:-unknown}"
   for b in $(bodies); do
-    v="$(pane_ver "$b")"; p="$(pane_pid "$b")"
+    v="$(pane_ver "$b")"; p="$(pane_pid "$b")"; m="$(body_model "$b")"
     state=idle
     if ! tmux has-session -t "$b" 2>/dev/null; then state="no session"
     elif turn_in_flight "$b"; then state="turn in flight"
     elif ! composer_idle "$b"; then state="composer busy"; fi
     flag=""; [ -n "$v" ] && [ "$v" != "$INSTALLED" ] && flag="  DRIFT"
     rc_failed "$b" && flag="$flag  RC-FAILED"
-    printf '  %-10s pid %-6s running %-10s %s%s\n' "$b" "${p:-?}" "${v:-?}" "$state" "$flag"
+    printf '  %-10s pid %-6s running %-10s %-18s %s%s\n' "$b" "${p:-?}" "${v:-?}" "${m:-?}" "$state" "$flag"
   done
   exit 0
 fi
