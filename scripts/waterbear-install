@@ -74,6 +74,10 @@ flags:
 env (see the header of this script or the README for the full story):
   CLAUDE_RC_NAME CLAUDE_RC_TITLE CLAUDE_RC_DIR CLAUDE_RC_WAKE
   CLAUDE_RC_RESUME CLAUDE_RC_RESUME_WAKE CLAUDE_RC_DOORBELL
+  CLAUDE_RC_WRAP   a command prefix the guard puts in front of claude, for example a
+                   secret injector: hush run DISCORD_BOT_TOKEN=my-bot-token --
+  CLAUDE_RC_ARGS   extra flags appended to the claude command, for example a channel:
+                   --dangerously-load-development-channels server:discord
 
 https://github.com/royashbrook/waterbear
 USAGE_EOF
@@ -103,7 +107,7 @@ done
 # slot instead. A deliberately passed value either lives in the session env or
 # differs from the global one, and still wins.
 if [ -n "${TMUX:-}" ]; then
-  for _v in CLAUDE_RC_NAME CLAUDE_RC_TITLE CLAUDE_RC_DIR CLAUDE_RC_WAKE CLAUDE_RC_RESUME CLAUDE_RC_RESUME_WAKE CLAUDE_RC_DOORBELL CLAUDE_RC_SESSION_FILE; do
+  for _v in CLAUDE_RC_NAME CLAUDE_RC_TITLE CLAUDE_RC_DIR CLAUDE_RC_WAKE CLAUDE_RC_RESUME CLAUDE_RC_RESUME_WAKE CLAUDE_RC_DOORBELL CLAUDE_RC_SESSION_FILE CLAUDE_RC_WRAP CLAUDE_RC_ARGS; do
     eval "_val=\${$_v:-}"
     [ -n "$_val" ] || continue
     tmux show-environment "$_v" >/dev/null 2>&1 && continue
@@ -122,6 +126,10 @@ WAKE="${CLAUDE_RC_WAKE:-}"
 RESUME="${CLAUDE_RC_RESUME:-}"
 RESUME_WAKE="${CLAUDE_RC_RESUME_WAKE:-}"
 DOORBELL="${CLAUDE_RC_DOORBELL:-}"
+# WRAP and ARGS are shell text by design, from your own plist: a prefix that runs claude (a
+# secret injector such as `hush run VAR=name --`) and flags appended to the claude command.
+WRAP="${CLAUDE_RC_WRAP:-}"
+ARGS="${CLAUDE_RC_ARGS:-}"
 USER_ID="$(id -u)"
 SHORTUSER="$(id -un | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9')"
 LABEL="com.${SHORTUSER}.claude-rc.${NAME}"
@@ -181,6 +189,8 @@ if [ -f "$PLIST" ]; then
   if [ -z "${CLAUDE_RC_DIR:-}" ]; then v="$(inherit CLAUDE_RC_DIR)"; [ -n "$v" ] && WORKDIR="$v"; fi
   if [ -z "${CLAUDE_RC_RESUME:-}" ]; then v="$(inherit CLAUDE_RC_RESUME)"; [ -n "$v" ] && RESUME="$v"; fi
   if [ -z "${CLAUDE_RC_SESSION_FILE:-}" ]; then v="$(inherit CLAUDE_RC_SESSION_FILE)"; [ -n "$v" ] && SF_INHERIT="$v"; fi
+  if [ -z "${CLAUDE_RC_WRAP:-}" ]; then v="$(inherit CLAUDE_RC_WRAP)"; [ -n "$v" ] && WRAP="$v"; fi
+  if [ -z "${CLAUDE_RC_ARGS:-}" ]; then v="$(inherit CLAUDE_RC_ARGS)"; [ -n "$v" ] && ARGS="$v"; fi
 fi
 SESSION_FILE="${CLAUDE_RC_SESSION_FILE:-${SF_INHERIT:-$HOME/.claude/rc-session-$NAME}}"
 
@@ -189,8 +199,8 @@ SESSION_FILE="${CLAUDE_RC_SESSION_FILE:-${SF_INHERIT:-$HOME/.claude/rc-session-$
 # has real logic in it; this is its observable check, doctor-style. Nothing below the
 # exit has run: no pin, no plist, no guard, no session.
 case " $* " in *" --print-config "*)
-  printf 'NAME=%s\nTITLE=%s\nWORKDIR=%s\nWAKE=%s\nRESUME=%s\nRESUME_WAKE=%s\nDOORBELL=%s\nSESSION_FILE=%s\n' \
-    "$NAME" "$TITLE" "$WORKDIR" "$WAKE" "$RESUME" "$RESUME_WAKE" "$DOORBELL" "$SESSION_FILE"
+  printf 'NAME=%s\nTITLE=%s\nWORKDIR=%s\nWAKE=%s\nRESUME=%s\nRESUME_WAKE=%s\nDOORBELL=%s\nSESSION_FILE=%s\nWRAP=%s\nARGS=%s\n' \
+    "$NAME" "$TITLE" "$WORKDIR" "$WAKE" "$RESUME" "$RESUME_WAKE" "$DOORBELL" "$SESSION_FILE" "$WRAP" "$ARGS"
   exit 0 ;;
 esac
 # --- PIN THE CALLER'S CONVERSATION (the whole promise of "waterbear yourself") ---
@@ -436,6 +446,10 @@ RESUME="${CLAUDE_RC_RESUME:-}"
 RESUME_WAKE="${CLAUDE_RC_RESUME_WAKE:-}"
 SESSION_FILE="${CLAUDE_RC_SESSION_FILE:-$HOME/.claude/rc-session-$NAME}"
 DOORBELL="${CLAUDE_RC_DOORBELL:-}"   # optional: a signal file the GUARD watches; a new line => wake the session
+WRAP="${CLAUDE_RC_WRAP:-}"           # optional: a command prefix that runs claude (a secret injector: hush run VAR=name --)
+ARGS="${CLAUDE_RC_ARGS:-}"           # optional: extra flags appended to the claude command (a channel, a plugin dir)
+# the launch line: prefix, claude, its fixed flags, then the extras. one place, both branches below.
+launch() { printf '%s' "${WRAP:+$WRAP }claude --remote-control \"$TITLE\"$1${ARGS:+ $ARGS}"; }
 command -v tmux   >/dev/null 2>&1 || exit 78
 command -v claude >/dev/null 2>&1 || exit 78
 
@@ -573,7 +587,8 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
       -e "CLAUDE_RC_WAKE=$WAKE" -e "CLAUDE_RC_RESUME=$RESUME" -e "CLAUDE_RC_RESUME_WAKE=$RESUME_WAKE" \
       -e "CLAUDE_RC_DOORBELL=$DOORBELL" \
       -e "CLAUDE_RC_SESSION_FILE=$SESSION_FILE" \
-      -c "$WORKDIR" "claude --remote-control \"$TITLE\" --resume $SID"
+      -e "CLAUDE_RC_WRAP=$WRAP" -e "CLAUDE_RC_ARGS=$ARGS" \
+      -c "$WORKDIR" "$(launch " --resume $SID")"
     NUDGE="$RESUME_WAKE"
   else
     # A fresh start that was ASKED FOR is normal. A fresh start we FELL BACK to is an
@@ -598,7 +613,8 @@ if ! tmux has-session -t "$NAME" 2>/dev/null; then
       -e "CLAUDE_RC_WAKE=$WAKE" -e "CLAUDE_RC_RESUME=$RESUME" -e "CLAUDE_RC_RESUME_WAKE=$RESUME_WAKE" \
       -e "CLAUDE_RC_DOORBELL=$DOORBELL" \
       -e "CLAUDE_RC_SESSION_FILE=$SESSION_FILE" \
-      -c "$WORKDIR" "claude --remote-control \"$TITLE\""
+      -e "CLAUDE_RC_WRAP=$WRAP" -e "CLAUDE_RC_ARGS=$ARGS" \
+      -c "$WORKDIR" "$(launch "")"
     NUDGE="$WAKE"
     if [ "$RESUME" = "1" ]; then
       # prepend the warning to whatever bootstrap was configured, so the agent knows
@@ -869,6 +885,8 @@ cat > "$PLIST" <<PLIST_EOF
     <key>CLAUDE_RC_RESUME</key>      <string>${RESUME}</string>
     <key>CLAUDE_RC_RESUME_WAKE</key> <string>${RESUME_WAKE}</string>
     <key>CLAUDE_RC_DOORBELL</key>    <string>${DOORBELL}</string>
+    <key>CLAUDE_RC_WRAP</key>        <string>${WRAP}</string>
+    <key>CLAUDE_RC_ARGS</key>        <string>${ARGS}</string>
     <key>HOME</key>                  <string>${HOME}</string>
   </dict>
   <key>StandardOutPath</key>  <string>/tmp/${LABEL}.log</string>
