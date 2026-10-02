@@ -266,6 +266,8 @@ start on the next respawn.
 | `CLAUDE_RC_RESUME` | `1` = resume the prior conversation by id instead of a fresh one |
 | `CLAUDE_RC_RESUME_WAKE` | prompt typed AFTER a resume (re-arm session-scoped rails) |
 | `CLAUDE_RC_SESSION_FILE` | override the id file path (default `~/.claude/rc-session-<name>`) |
+| `CLAUDE_RC_WRAP` | a command prefix the guard puts in front of `claude`, shell text from your own plist. the use it was built for: a secret injector, `hush run DISCORD_BOT_TOKEN=my-bot-token --`, so a bot token reaches the session's environment without ever sitting in a file or on a command line |
+| `CLAUDE_RC_ARGS` | extra flags appended to the `claude` command, shell text from your own plist. the use it was built for: a channel, `--dangerously-load-development-channels server:discord`, so the body answers a chat platform as well as the terminal |
 | `CLAUDE_RC_CONNECT_URL` | URL the guard fetches to test real internet (default `https://1.1.1.1/`; an IP avoids a DNS dependency) |
 | `CLAUDE_RC_NET_CHECK_SECS` | how often to probe connectivity in the watch loop (default `30`) |
 | `CLAUDE_RC_OUTAGE_RESPAWN_SECS` | an outage longer than this, once internet recovers, triggers a respawn (default `600`; set `0` to respawn on any connectivity blip) |
