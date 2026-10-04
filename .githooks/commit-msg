@@ -9,6 +9,23 @@ set -e
 msg_file="$1"
 content=$(grep -vE '^#' "$msg_file" || true)
 
+# Optional local check on the message text, for clones that want one (names, private links).
+# Set it per clone, it is never part of the repo:  git config hooks.leakcheck /path/to/checker
+# The checker reads the message on stdin and exits non-zero to reject. It runs first, on every
+# message including merges and reverts. Set but missing or not executable refuses the commit,
+# so a broken path never reads as a pass.
+checker=$(git config --get hooks.leakcheck || true)
+if [ -n "$checker" ]; then
+  if [ ! -x "$checker" ]; then
+    echo "ERROR: hooks.leakcheck is set to '$checker' but that is not an executable file." >&2
+    exit 1
+  fi
+  if ! out=$(printf '%s\n' "$content" | "$checker" 2>&1); then
+    printf 'ERROR: hooks.leakcheck rejected this message:\n%s\nreword it, or override a one-off with --no-verify.\n' "$out" >&2
+    exit 1
+  fi
+fi
+
 first_line=$(echo "$content" | head -n 1)
 if echo "$first_line" | grep -qE '^(Merge|Revert) '; then
   exit 0
@@ -23,17 +40,6 @@ found: $bad
 every commit on waterbear must reference an issue in this repo (#NNN).
 EOF
   exit 1
-fi
-
-# Optional local check on the message text, for clones that want one (names, private links).
-# Set it per clone, it is never part of the repo:  git config hooks.leakcheck /path/to/checker
-# The checker reads the message on stdin and exits non-zero to reject.
-checker=$(git config --get hooks.leakcheck || true)
-if [ -n "$checker" ] && [ -x "$checker" ]; then
-  if ! out=$(echo "$content" | "$checker" 2>&1); then
-    printf 'ERROR: hooks.leakcheck rejected this message:\n%s\nreword it, or override a one-off with --no-verify.\n' "$out" >&2
-    exit 1
-  fi
 fi
 
 # Require a bare #NNN ref (or explicit royashbrook/waterbear#NNN).
